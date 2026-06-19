@@ -24,12 +24,13 @@ const API_KEY = ENV.ANTHROPIC_API_KEY;
 const MODEL = ENV.MODEL || "claude-sonnet-4-6";
 const PORT = ENV.PORT || 3030;
 const HOTMART_HOTTOK = ENV.HOTMART_HOTTOK || null; // valida assinatura do webhook quando setado
-if (!API_KEY) { console.error("FALTA ANTHROPIC_API_KEY no .env"); process.exit(1); }
+if (!API_KEY) console.warn("[aviso] ANTHROPIC_API_KEY ausente — o servidor sobe, mas as respostas da IA falham até a chave ser configurada.");
 
 // produtos IREC 2 (Hotmart) → tipo
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 
 async function callClaude(system, messages) {
+  if (!API_KEY) throw new Error("ANTHROPIC_API_KEY ausente no ambiente");
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
