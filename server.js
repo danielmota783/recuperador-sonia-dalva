@@ -106,6 +106,18 @@ const server = http.createServer(async (req, res) => {
       if (key !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
       return send(res, 200, lastHotmart || { vazio: true });
     }
+    if (req.method === "GET" && url === "/api/_env") {
+      const key = new URLSearchParams(req.url.split("?")[1] || "").get("key");
+      if (key !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
+      return send(res, 200, {
+        DATA_DIR: process.env.DATA_DIR || "(NAO setado -> usa ./data EFEMERO)",
+        MODEL: ENV.MODEL || "(default)",
+        hottokSet: !!HOTMART_HOTTOK,
+        anthropicSet: !!API_KEY,
+        manychatSet: !!ENV.MANYCHAT_API_TOKEN,
+        leads: store.allLeads().length,
+      });
+    }
 
     // --- SIMULADOR (stateless) — mantém a bancada de teste do cérebro ---
     if (req.method === "POST" && url === "/api/chat") {
@@ -121,10 +133,10 @@ const server = http.createServer(async (req, res) => {
     // --- WEBHOOK HOTMART: detecta abandono OU marca venda recuperada ---
     if (req.method === "POST" && url === "/webhook/hotmart") {
       const now = Date.now();
-      if (HOTMART_HOTTOK && req.headers["x-hotmart-hottok"] !== HOTMART_HOTTOK)
-        return send(res, 401, { error: "hottok inválido" });
       const payload = await readJson(req);
-      lastHotmart = { recebidoEm: new Date(Date.now()).toISOString(), headers: req.headers, payload };
+      const hottokOk = !HOTMART_HOTTOK || req.headers["x-hotmart-hottok"] === HOTMART_HOTTOK;
+      lastHotmart = { recebidoEm: new Date(Date.now()).toISOString(), hottokOk, headers: req.headers, payload };
+      if (!hottokOk) return send(res, 401, { error: "hottok inválido" });
       const e = parseHotmart(payload);
       if (e.kind === "venda") {
         const lead = store.getLead(e.phone);
