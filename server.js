@@ -28,6 +28,7 @@ if (!API_KEY) console.warn("[aviso] ANTHROPIC_API_KEY ausente — o servidor sob
 
 // produtos IREC 2 (Hotmart) → tipo
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
+let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 
 async function callClaude(system, messages) {
   if (!API_KEY) throw new Error("ANTHROPIC_API_KEY ausente no ambiente");
@@ -91,6 +92,11 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, store.metrics());
     if (req.method === "GET" && url === "/api/leads")
       return send(res, 200, store.allLeads());
+    if (req.method === "GET" && url === "/api/_lasthook") {
+      const key = new URLSearchParams(req.url.split("?")[1] || "").get("key");
+      if (key !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
+      return send(res, 200, lastHotmart || { vazio: true });
+    }
 
     // --- SIMULADOR (stateless) — mantém a bancada de teste do cérebro ---
     if (req.method === "POST" && url === "/api/chat") {
@@ -109,6 +115,7 @@ const server = http.createServer(async (req, res) => {
       if (HOTMART_HOTTOK && req.headers["x-hotmart-hottok"] !== HOTMART_HOTTOK)
         return send(res, 401, { error: "hottok inválido" });
       const payload = await readJson(req);
+      lastHotmart = { recebidoEm: new Date(Date.now()).toISOString(), headers: req.headers, payload };
       const e = parseHotmart(payload);
       if (e.kind === "venda") {
         const lead = store.getLead(e.phone);
