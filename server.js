@@ -140,9 +140,9 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, { reply: bye, status: "optout" });
       }
 
-      // monta histórico pro Claude (abertura do gatilho + mensagens trocadas)
-      const g = GATILHOS[lead.gatilho] || GATILHOS.ingresso_abandono;
-      const history = [{ role: "assistant", content: g.abertura }, ...lead.messages.map(m => ({ role: m.role, content: m.content }))];
+      // re-busca o lead pra incluir a msg recem-adicionada; historico SEMPRE termina em user
+      lead = store.getLead(phone);
+      const history = lead.messages.map(m => ({ role: m.role, content: m.content }));
       const reply = await callClaude(systemPrompt(lead.gatilho), history);
       store.appendMessage(phone, "assistant", reply, now);
       const st = escalated(reply) ? "escalado" : "em_conversa";
