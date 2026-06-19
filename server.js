@@ -6,6 +6,7 @@ const fs = require("fs");
 const path = require("path");
 const { GATILHOS, systemPrompt } = require("./knowledge");
 const store = require("./store");
+const hotmart = require("./hotmart");
 
 // --- env ---
 function loadEnv() {
@@ -87,6 +88,29 @@ function parseHotmart(p) {
   return { kind, phone, firstName, product: productType, gatilho, value, sck, status };
 }
 
+// --- VIGIA DE PIX/BOLETO PENDENTE (recuperação ativa via API Hotmart) ---
+const POLL_PRODUCTS = [7860446]; // ingresso IREC (mentoria 7016784 entra na Fase 3)
+async function runRecoveryPoll() {
+  const now = Date.now();
+  const novos = [];
+  for (const pid of POLL_PRODUCTS) {
+    let pend = [];
+    try { pend = await hotmart.pendingPayments(pid); }
+    catch (e) { console.warn("[poll] hotmart falhou:", e.message); continue; }
+    for (const rec of pend) {
+      const phone = toE164BR(rec.phone);
+      if (!phone || store.getLead(phone)) continue; // já detectado
+      const ptype = PRODUCT_MAP[String(rec.productId)] || "ingresso";
+      const method = String(rec.paymentType || "PIX").toUpperCase().includes("BILLET") ? "boleto" : "pix";
+      store.upsertLead({ phone, firstName: rec.firstName, product: ptype, gatilho: `${ptype}_${method}`, value: rec.value, sck: "recuperacao" }, now);
+      novos.push({ phone, nome: rec.firstName, gatilho: `${ptype}_${method}`, transacao: rec.transaction });
+      // TODO: disparar 1º toque via ManyChat (template aprovado) quando o fluxo estiver montado
+    }
+  }
+  if (novos.length) console.log("[poll] novos pendentes:", JSON.stringify(novos));
+  return novos;
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     const url = req.url.split("?")[0];
@@ -117,6 +141,12 @@ const server = http.createServer(async (req, res) => {
         manychatSet: !!ENV.MANYCHAT_API_TOKEN,
         leads: store.allLeads().length,
       });
+    }
+    if (req.method === "GET" && url === "/api/_poll") {
+      const key = new URLSearchParams(req.url.split("?")[1] || "").get("key");
+      if (key !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
+      const novos = await runRecoveryPoll();
+      return send(res, 200, { ok: true, novos });
     }
 
     // --- SIMULADOR (stateless) — mantém a bancada de teste do cérebro ---
@@ -185,3 +215,12 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => console.log(`Recuperador no ar em http://localhost:${PORT}  (sim: /  ·  crm: /crm)  |  modelo ${MODEL}`));
+
+// vigia automático de pix/boleto pendente
+const POLL_MIN = Number(ENV.POLL_MIN || 5);
+if (ENV.HOTMART_CLIENT_ID && ENV.HOTMART_CLIENT_SECRET) {
+  setInterval(() => runRecoveryPoll().catch(e => console.warn("[poll]", e.message)), POLL_MIN * 60 * 1000);
+  console.log(`[poll] vigia de pix/boleto pendente ATIVO a cada ${POLL_MIN} min`);
+} else {
+  console.warn("[poll] HOTMART_CLIENT_ID/SECRET ausentes — vigia desligado");
+}
