@@ -23,7 +23,7 @@ const ENV = { ...loadEnv(), ...process.env };
 const API_KEY = ENV.ANTHROPIC_API_KEY;
 const MODEL = ENV.MODEL || "claude-sonnet-4-6";
 const PORT = ENV.PORT || 3030;
-const HOTMART_HOTTOK = ENV.HOTMART_HOTTOK || null; // valida assinatura do webhook quando setado
+const HOTMART_HOTTOK = ENV.HOTMART_HOTTOK || ENV.HOTTOK || null; // aceita os dois nomes; valida assinatura quando setado
 if (!API_KEY) console.warn("[aviso] ANTHROPIC_API_KEY ausente — o servidor sobe, mas as respostas da IA falham até a chave ser configurada.");
 
 // produtos IREC 2 (Hotmart) → tipo
