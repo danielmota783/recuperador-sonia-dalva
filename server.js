@@ -55,7 +55,16 @@ function readJson(req) {
 function escalated(reply) { return /pessoa da minha equipe te chamar/i.test(reply); }
 function isOptout(text) { return /^\s*sair\s*$/i.test(text || ""); }
 
-// --- normaliza payload da Hotmart (shape a confirmar no sandbox; parser tolerante) ---
+// garante E.164 do Brasil (prefixo 55) pro WhatsApp
+function toE164BR(p) {
+  const d = String(p || "").replace(/\D/g, "");
+  if (!d) return "";
+  if (d.startsWith("55") && d.length >= 12) return d;
+  if (d.length === 10 || d.length === 11) return "55" + d;
+  return d;
+}
+
+// --- normaliza payload da Hotmart (shape CONFIRMADO no teste real 19/06; Webhook 2.0) ---
 function parseHotmart(p) {
   const data = p.data || p;
   const purchase = data.purchase || {};
@@ -64,10 +73,10 @@ function parseHotmart(p) {
   const productId = String(product.id || purchase.product_id || p.product_id || "");
   const productType = PRODUCT_MAP[productId] || (p.product || "ingresso");
   const status = (p.event || purchase.status || p.status || "").toUpperCase();
-  const phone = buyer.checkout_phone || buyer.phone || p.phone || "";
-  const firstName = (buyer.name || p.firstName || p.name || "amiga").split(" ")[0];
+  const phone = toE164BR(buyer.checkout_phone || buyer.phone || p.phone || "");
+  const firstName = (buyer.first_name || buyer.name || p.firstName || p.name || "amiga").split(" ")[0];
   const value = (purchase.price && purchase.price.value) || p.value || 0;
-  const sck = (purchase.tracking && purchase.tracking.source_sck) || p.sck || null;
+  const sck = (purchase.tracking && purchase.tracking.source_sck) || purchase.sckPaymentLink || p.sck || null;
 
   let gatilho = null, kind = null;
   if (/APPROVED|COMPLETE/.test(status)) kind = "venda";
