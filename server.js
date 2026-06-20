@@ -27,6 +27,15 @@ const PORT = ENV.PORT || 3030;
 const HOTMART_HOTTOK = ENV.HOTMART_HOTTOK || ENV.HOTTOK || null; // aceita os dois nomes; valida assinatura quando setado
 if (!API_KEY) console.warn("[aviso] ANTHROPIC_API_KEY ausente — o servidor sobe, mas as respostas da IA falham até a chave ser configurada.");
 
+// Rede de seguranca: nada derruba o processo. Captura o ultimo erro pra diagnostico remoto.
+let lastError = null;
+function recordErr(type, e) {
+  lastError = { when: new Date(Date.now()).toISOString(), type, msg: String((e && e.message) || e), stack: String((e && e.stack) || "").slice(0, 1000) };
+  console.error(`[${type}]`, e);
+}
+process.on("uncaughtException", e => recordErr("uncaughtException", e));
+process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
+
 // produtos IREC 2 (Hotmart) → tipo
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
@@ -98,13 +107,15 @@ async function runRecoveryPoll() {
     try { pend = await hotmart.pendingPayments(pid); }
     catch (e) { console.warn("[poll] hotmart falhou:", e.message); continue; }
     for (const rec of pend) {
-      const phone = toE164BR(rec.phone);
-      if (!phone || store.getLead(phone)) continue; // já detectado
-      const ptype = PRODUCT_MAP[String(rec.productId)] || "ingresso";
-      const method = String(rec.paymentType || "PIX").toUpperCase().includes("BILLET") ? "boleto" : "pix";
-      store.upsertLead({ phone, firstName: rec.firstName, product: ptype, gatilho: `${ptype}_${method}`, value: rec.value, sck: "recuperacao" }, now);
-      novos.push({ phone, nome: rec.firstName, gatilho: `${ptype}_${method}`, transacao: rec.transaction });
-      // TODO: disparar 1º toque via ManyChat (template aprovado) quando o fluxo estiver montado
+      try {
+        const phone = toE164BR(rec.phone);
+        if (!phone || store.getLead(phone)) continue; // já detectado
+        const ptype = PRODUCT_MAP[String(rec.productId)] || "ingresso";
+        const method = String(rec.paymentType || "PIX").toUpperCase().includes("BILLET") ? "boleto" : "pix";
+        store.upsertLead({ phone, firstName: rec.firstName, product: ptype, gatilho: `${ptype}_${method}`, value: rec.value, sck: "recuperacao" }, now);
+        novos.push({ phone, nome: rec.firstName, gatilho: `${ptype}_${method}`, transacao: rec.transaction });
+        // TODO: disparar 1º toque via ManyChat (template aprovado) quando o fluxo estiver montado
+      } catch (e) { console.warn("[poll] registro falhou:", e.message); }
     }
   }
   if (novos.length) console.log("[poll] novos pendentes:", JSON.stringify(novos));
@@ -139,7 +150,9 @@ const server = http.createServer(async (req, res) => {
         hottokSet: !!HOTMART_HOTTOK,
         anthropicSet: !!API_KEY,
         manychatSet: !!ENV.MANYCHAT_API_TOKEN,
+        hotmartSet: !!(ENV.HOTMART_CLIENT_ID && ENV.HOTMART_CLIENT_SECRET),
         leads: store.allLeads().length,
+        lastError,
       });
     }
     if (req.method === "GET" && url === "/api/_poll") {
