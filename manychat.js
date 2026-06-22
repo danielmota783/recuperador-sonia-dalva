@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 
 function token() {
+  if (process.env.MANYCHAT_API_TOKEN) return process.env.MANYCHAT_API_TOKEN; // Railway
   try {
     const raw = fs.readFileSync(path.join(__dirname, ".env"), "utf8");
     const m = raw.match(/^\s*MANYCHAT_API_TOKEN\s*=\s*(.+)\s*$/m);
