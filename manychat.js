@@ -30,6 +30,7 @@ async function mc(endpoint, method = "GET", body) {
 // --- Leitura ---
 const getInfo = () => mc("/fb/page/getInfo");
 const findByPhone = (phone) => mc("/fb/subscriber/findBySystemField?phone=" + encodeURIComponent(phone));
+const findByCustomField = (fieldId, value) => mc(`/fb/subscriber/findByCustomField?field_id=${fieldId}&field_value=${encodeURIComponent(value)}`);
 const getFlows = () => mc("/fb/page/getFlows");
 
 // --- Assinante ---
@@ -64,27 +65,32 @@ const sendText = (subscriberId, text) =>
   });
 
 // 1º toque: acha/cria o assinante pelo telefone e dispara o fluxo (template aprovado).
+const WHATSAPP_ID_FIELD = Number(process.env.MANYCHAT_WAID_FIELD || 13024789); // campo "Whatsapp_ID" do funil da Sonia
+
+function pickId(x) {
+  if (!x) return null;
+  const arr = Array.isArray(x) ? x : [x];
+  const s = arr[0];
+  return s && (s.id || s.subscriber_id || (s.subscriber && s.subscriber.id)) || null;
+}
+
 async function firstTouch({ phone, firstName, flowNs }) {
   const digits = String(phone).replace(/\D/g, "");
-  const p = "+" + digits;
+  const plus = "+" + digits;
   let id = null;
-  // tenta achar (contatos criados por nós ficam buscáveis por phone)
-  for (const q of [p, digits]) {
-    try { const sub = await findByPhone(q); id = sub && (sub.id || (sub.subscriber && sub.subscriber.id)); if (id) break; } catch (e) { /* segue */ }
-  }
+  // 1) acha aluna existente pelo campo Whatsapp_ID (formato +55...) — caso mais comum
+  try { id = pickId(await findByCustomField(WHATSAPP_ID_FIELD, plus)); } catch (e) { /* segue */ }
+  // 2) fallback: por phone (contatos que nós criamos têm phone setado)
+  if (!id) { try { id = pickId(await findByPhone(plus)); } catch (e) { /* segue */ } }
+  // 3) cria novo e grava o Whatsapp_ID pra ser achável depois
   if (!id) {
-    try {
-      const created = await createSubscriber({ phone: p, firstName });
-      id = created && (created.id || created.subscriber_id || (created.subscriber && created.subscriber.id));
-    } catch (e) {
-      if (/already exists/i.test(e.message))
-        throw new Error(`contato já existe no ManyChat (campo phone vazio, vindo do funil) — id não recuperável via API: ${digits}`);
-      throw e;
-    }
+    const created = await createSubscriber({ phone: plus, firstName });
+    id = pickId(created);
+    if (id) { try { await setCustomField(id, WHATSAPP_ID_FIELD, plus); } catch (e) { /* nao bloqueia */ } }
   }
-  if (!id) throw new Error("ManyChat: nao obteve subscriber id");
+  if (!id) throw new Error("ManyChat: nao obteve subscriber id para " + digits);
   await sendFlow(id, flowNs);
   return id;
 }
 
-module.exports = { mc, getInfo, findByPhone, getFlows, createSubscriber, setCustomField, addTag, sendFlow, sendText, firstTouch };
+module.exports = { mc, getInfo, findByPhone, findByCustomField, getFlows, createSubscriber, setCustomField, addTag, sendFlow, sendText, firstTouch };

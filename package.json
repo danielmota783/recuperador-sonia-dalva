@@ -1,6 +1,6 @@
 {
   "name": "recuperador-sonia-dalva",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "Recuperador de Vendas IA (Sonia / IREC 2) — simulador do motor de conversa. Foundation do microserviço.",
   "main": "server.js",
