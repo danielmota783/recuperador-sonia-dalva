@@ -183,6 +183,25 @@ const server = http.createServer(async (req, res) => {
       try { const id = await manychat.firstTouch({ phone, firstName: name, flowNs: FLOW_NS_PIX }); return send(res, 200, { ok: true, subscriberId: id, phone }); }
       catch (e) { return send(res, 200, { ok: false, error: e.message }); }
     }
+    // --- SEED de teste: cria lead com gatilho escolhido + dispara 1º toque (bancada ponta-a-ponta) ---
+    if (req.method === "GET" && url === "/api/_seed") {
+      const q = new URLSearchParams(req.url.split("?")[1] || "");
+      if (q.get("key") !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
+      const now = Date.now();
+      const phone = toE164BR(q.get("phone") || "");
+      const name = q.get("name") || "amiga";
+      const gatilho = GATILHOS[q.get("gatilho")] ? q.get("gatilho") : "ingresso_pix";
+      const product = gatilho.startsWith("mentoria") ? "mentoria" : "ingresso";
+      const fire = q.get("fire") !== "false"; // por padrão dispara o template
+      if (!phone) return send(res, 400, { error: "phone obrigatório" });
+      store.upsertLead({ phone, firstName: name, product, gatilho, value: Number(q.get("value") || 0), sck: "teste" }, now);
+      let ft = null;
+      if (fire) {
+        try { const id = await manychat.firstTouch({ phone, firstName: name, flowNs: FLOW_NS_PIX }); store.setState(phone, "ABORDADO", now, { firstTouch: true }); ft = { ok: true, subscriberId: id }; }
+        catch (e) { ft = { ok: false, error: e.message }; }
+      }
+      return send(res, 200, { ok: true, phone, gatilho, firstTouch: ft });
+    }
 
     // --- SIMULADOR (stateless) — mantém a bancada de teste do cérebro ---
     if (req.method === "POST" && url === "/api/chat") {
