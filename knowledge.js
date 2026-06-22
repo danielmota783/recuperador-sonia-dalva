@@ -130,7 +130,10 @@ const GATILHOS = {
   }
 };
 
+const PROMPTS = require("./prompts");
+
 function systemPrompt(gatilhoKey) {
+  if (gatilhoKey === "ingresso_pix") return PROMPTS.PIX; // prompt blindado dedicado (voz Sonia + anti-erro verificado)
   const g = GATILHOS[gatilhoKey] || GATILHOS.ingresso_abandono;
   return `Você é a Sonia Dalva conversando no WhatsApp para recuperar uma venda que não foi finalizada. Você está recuperando uma pessoa real que demonstrou interesse mas não concluiu a compra.
 
