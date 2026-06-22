@@ -102,10 +102,11 @@ const POLL_PRODUCTS = [7860446]; // ingresso IREC (mentoria 7016784 entra na Fas
 async function runRecoveryPoll() {
   const now = Date.now();
   const novos = [];
+  const erros = [];
   for (const pid of POLL_PRODUCTS) {
     let pend = [];
     try { pend = await hotmart.pendingPayments(pid); }
-    catch (e) { console.warn("[poll] hotmart falhou:", e.message); continue; }
+    catch (e) { erros.push(`produto ${pid}: ${e.message}`); console.warn("[poll] hotmart falhou:", e.message); continue; }
     for (const rec of pend) {
       try {
         const phone = toE164BR(rec.phone);
@@ -119,7 +120,7 @@ async function runRecoveryPoll() {
     }
   }
   if (novos.length) console.log("[poll] novos pendentes:", JSON.stringify(novos));
-  return novos;
+  return { novos, erros };
 }
 
 const server = http.createServer(async (req, res) => {
@@ -158,8 +159,8 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url === "/api/_poll") {
       const key = new URLSearchParams(req.url.split("?")[1] || "").get("key");
       if (key !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
-      const novos = await runRecoveryPoll();
-      return send(res, 200, { ok: true, novos });
+      const r = await runRecoveryPoll();
+      return send(res, 200, { ok: true, ...r });
     }
 
     // --- SIMULADOR (stateless) — mantém a bancada de teste do cérebro ---
