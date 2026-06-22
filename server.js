@@ -7,6 +7,7 @@ const path = require("path");
 const { GATILHOS, systemPrompt } = require("./knowledge");
 const store = require("./store");
 const hotmart = require("./hotmart");
+const manychat = require("./manychat");
 
 // --- env ---
 function loadEnv() {
@@ -97,6 +98,10 @@ function parseHotmart(p) {
   return { kind, phone, firstName, product: productType, gatilho, value, sck, status };
 }
 
+// --- 1º TOQUE via ManyChat (template aprovado) ---
+const FLOW_NS_PIX = ENV.FLOW_NS_PIX || "content20260622165339_068522"; // fluxo "Recuperação Pix - IREC 02"
+const FIRST_TOUCH = ENV.FIRST_TOUCH_ENABLED === "true"; // trava: só dispara automático quando ligado
+
 // --- VIGIA DE PIX/BOLETO PENDENTE (recuperação ativa via API Hotmart) ---
 const POLL_PRODUCTS = [7860446]; // ingresso IREC (mentoria 7016784 entra na Fase 3)
 async function runRecoveryPoll() {
@@ -113,9 +118,16 @@ async function runRecoveryPoll() {
         if (!phone || store.getLead(phone)) continue; // já detectado
         const ptype = PRODUCT_MAP[String(rec.productId)] || "ingresso";
         const method = String(rec.paymentType || "PIX").toUpperCase().includes("BILLET") ? "boleto" : "pix";
-        store.upsertLead({ phone, firstName: rec.firstName, product: ptype, gatilho: `${ptype}_${method}`, value: rec.value, sck: "recuperacao" }, now);
-        novos.push({ phone, nome: rec.firstName, gatilho: `${ptype}_${method}`, transacao: rec.transaction });
-        // TODO: disparar 1º toque via ManyChat (template aprovado) quando o fluxo estiver montado
+        const gatilho = `${ptype}_${method}`;
+        store.upsertLead({ phone, firstName: rec.firstName, product: ptype, gatilho, value: rec.value, sck: "recuperacao" }, now);
+        novos.push({ phone, nome: rec.firstName, gatilho, transacao: rec.transaction });
+        // 1º toque automático (só pix por enquanto, e só se a trava estiver ligada)
+        if (FIRST_TOUCH && gatilho === "ingresso_pix") {
+          try {
+            await manychat.firstTouch({ phone, firstName: rec.firstName, flowNs: FLOW_NS_PIX });
+            store.setState(phone, "ABORDADO", now, { firstTouch: true });
+          } catch (e) { erros.push(`firstTouch ${phone}: ${e.message}`); }
+        }
       } catch (e) { console.warn("[poll] registro falhou:", e.message); }
     }
   }
@@ -161,6 +173,15 @@ const server = http.createServer(async (req, res) => {
       if (key !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
       const r = await runRecoveryPoll();
       return send(res, 200, { ok: true, ...r });
+    }
+    if (req.method === "GET" && url === "/api/_firsttouch") {
+      const q = new URLSearchParams(req.url.split("?")[1] || "");
+      if (q.get("key") !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
+      const phone = toE164BR(q.get("phone") || "");
+      const name = q.get("name") || "amiga";
+      if (!phone) return send(res, 400, { error: "phone obrigatório" });
+      try { const id = await manychat.firstTouch({ phone, firstName: name, flowNs: FLOW_NS_PIX }); return send(res, 200, { ok: true, subscriberId: id, phone }); }
+      catch (e) { return send(res, 200, { ok: false, error: e.message }); }
     }
 
     // --- SIMULADOR (stateless) — mantém a bancada de teste do cérebro ---

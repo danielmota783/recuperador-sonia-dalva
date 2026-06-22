@@ -62,4 +62,18 @@ const sendText = (subscriberId, text) =>
     message_tag: "ACCOUNT_UPDATE",
   });
 
-module.exports = { mc, getInfo, findByPhone, getFlows, createSubscriber, setCustomField, addTag, sendFlow, sendText };
+// 1º toque: acha/cria o assinante pelo telefone e dispara o fluxo (template aprovado).
+async function firstTouch({ phone, firstName, flowNs }) {
+  const p = phone.startsWith("+") ? phone : "+" + String(phone).replace(/\D/g, "");
+  let id = null;
+  try { const sub = await findByPhone(p); id = sub && (sub.id || (sub.subscriber && sub.subscriber.id)); } catch (e) { /* nao existe ainda */ }
+  if (!id) {
+    const created = await createSubscriber({ phone: p, firstName });
+    id = created && (created.id || created.subscriber_id || (created.subscriber && created.subscriber.id));
+  }
+  if (!id) throw new Error("ManyChat: nao obteve subscriber id");
+  await sendFlow(id, flowNs);
+  return id;
+}
+
+module.exports = { mc, getInfo, findByPhone, getFlows, createSubscriber, setCustomField, addTag, sendFlow, sendText, firstTouch };
