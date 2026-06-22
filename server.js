@@ -40,6 +40,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 // produtos IREC 2 (Hotmart) → tipo
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
+let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
 
 async function callClaude(system, messages) {
   if (!API_KEY) throw new Error("ANTHROPIC_API_KEY ausente no ambiente");
@@ -154,6 +155,11 @@ const server = http.createServer(async (req, res) => {
       if (key !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
       return send(res, 200, lastHotmart || { vazio: true });
     }
+    if (req.method === "GET" && url === "/api/_lastreply") {
+      const key = new URLSearchParams(req.url.split("?")[1] || "").get("key");
+      if (key !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
+      return send(res, 200, lastReplyHit || { vazio: true, nota: "nenhum POST chegou no /api/reply ainda" });
+    }
     if (req.method === "GET" && url === "/api/_env") {
       const key = new URLSearchParams(req.url.split("?")[1] || "").get("key");
       if (key !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
@@ -239,8 +245,10 @@ const server = http.createServer(async (req, res) => {
     // body: { phone, firstName?, text }  → { reply, status }
     if (req.method === "POST" && url === "/api/reply") {
       const now = Date.now();
-      const { phone, firstName, text } = await readJson(req);
-      if (!phone || !text) return send(res, 400, { error: "phone e text obrigatórios" });
+      const body = await readJson(req);
+      const { phone, firstName, text } = body || {};
+      lastReplyHit = { recebidoEm: new Date(now).toISOString(), ua: req.headers["user-agent"] || null, contentType: req.headers["content-type"] || null, body, parsed: { phone: phone || null, firstName: firstName || null, text: text || null } };
+      if (!phone || !text) return send(res, 400, { error: "phone e text obrigatórios", recebido: body });
       let lead = store.getLead(phone) || store.upsertLead({ phone, firstName, gatilho: "ingresso_abandono", product: "ingresso" }, now);
       if (lead.optout) return send(res, 200, { reply: "", status: "optout" });
 
