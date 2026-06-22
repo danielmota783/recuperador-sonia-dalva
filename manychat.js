@@ -65,12 +65,22 @@ const sendText = (subscriberId, text) =>
 
 // 1º toque: acha/cria o assinante pelo telefone e dispara o fluxo (template aprovado).
 async function firstTouch({ phone, firstName, flowNs }) {
-  const p = phone.startsWith("+") ? phone : "+" + String(phone).replace(/\D/g, "");
+  const digits = String(phone).replace(/\D/g, "");
+  const p = "+" + digits;
   let id = null;
-  try { const sub = await findByPhone(p); id = sub && (sub.id || (sub.subscriber && sub.subscriber.id)); } catch (e) { /* nao existe ainda */ }
+  // tenta achar (contatos criados por nós ficam buscáveis por phone)
+  for (const q of [p, digits]) {
+    try { const sub = await findByPhone(q); id = sub && (sub.id || (sub.subscriber && sub.subscriber.id)); if (id) break; } catch (e) { /* segue */ }
+  }
   if (!id) {
-    const created = await createSubscriber({ phone: p, firstName });
-    id = created && (created.id || created.subscriber_id || (created.subscriber && created.subscriber.id));
+    try {
+      const created = await createSubscriber({ phone: p, firstName });
+      id = created && (created.id || created.subscriber_id || (created.subscriber && created.subscriber.id));
+    } catch (e) {
+      if (/already exists/i.test(e.message))
+        throw new Error(`contato já existe no ManyChat (campo phone vazio, vindo do funil) — id não recuperável via API: ${digits}`);
+      throw e;
+    }
   }
   if (!id) throw new Error("ManyChat: nao obteve subscriber id");
   await sendFlow(id, flowNs);
