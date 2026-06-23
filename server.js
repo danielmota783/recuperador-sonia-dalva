@@ -41,6 +41,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
+const BUILD = "persist-test-1"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 async function callClaude(system, messages) {
   if (!API_KEY) throw new Error("ANTHROPIC_API_KEY ausente no ambiente");
@@ -154,6 +155,9 @@ const server = http.createServer(async (req, res) => {
       const key = new URLSearchParams(req.url.split("?")[1] || "").get("key");
       if (key !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
       return send(res, 200, lastHotmart || { vazio: true });
+    }
+    if (req.method === "GET" && url === "/api/_version") {
+      return send(res, 200, { build: BUILD });
     }
     if (req.method === "GET" && url === "/api/_lastreply") {
       const key = new URLSearchParams(req.url.split("?")[1] || "").get("key");
