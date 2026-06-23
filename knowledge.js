@@ -150,7 +150,10 @@ function fill(tpl, lead) {
 }
 
 function systemPrompt(gatilhoKey, lead) {
-  if (gatilhoKey === "ingresso_pix") return fill(PROMPTS.PIX, lead); // prompt blindado dedicado
+  // prompts blindados dedicados (voz Sonia + anti-erro verificado, link/preço por lote)
+  if (gatilhoKey === "ingresso_pix") return fill(PROMPTS.PIX, lead);
+  if (gatilhoKey === "ingresso_boleto") return fill(PROMPTS.BOLETO, lead);
+  if (gatilhoKey === "ingresso_cartao") return fill(PROMPTS.CARTAO, lead);
   const g = GATILHOS[gatilhoKey] || GATILHOS.ingresso_abandono;
   const link = checkout.checkoutLink(lead);
   const dados = link
