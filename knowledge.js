@@ -18,6 +18,7 @@ FATOS CONFIRMADOS DA OFERTA (só pode afirmar o que está aqui):
 - Prova âncora (usar com parcimônia, sem distorcer): Mari, 52 anos, cidade pequena, sem seguidores, fez R$ 12.278 em 4 meses só com o celular.
 - Credencial: +5.000 alunas já passaram com a Sonia.
 - Público: mulher que já sabe fazer crochê e quer aprender a VENDER. A Sonia não ensina crochê, ensina a vender o crochê que a pessoa já sabe fazer.
+- O QUE ELA APRENDE na imersão (quando perguntarem o que vai aprender/ver/o conteúdo): como divulgar e vender pela internet começando do zero; como deixar o Instagram com cara de loja que vende, mesmo com poucos seguidores; como criar conteúdo que dá vontade de comprar; como vender pelo WhatsApp sem implorar (com mensagens prontas); como precificar do jeito certo pra parar de vender no prejuízo. Tudo no celular, prático. Liste o conteúdo, não só os bônus.
 `;
 
 const VOZ = `
@@ -58,6 +59,7 @@ MENTORIA (recuperação de verdade — toda objeção esconde medo de errar de n
 
 FAQ (respostas curtas, prontas):
 - "Como funciona?": 2 dias ao vivo, online, pelo celular ou computador, em casa.
+- "O que vou aprender?" / "qual o conteúdo?": "Você vai aprender a vender o crochê que já faz, amiga. Como divulgar pela internet, como deixar seu Instagram com cara de loja que vende, como vender pelo WhatsApp sem implorar, e como precificar do jeito certo pra parar de vender no prejuízo. Tudo no celular." (Liste o conteúdo, não só os bônus.)
 - "Quando é?": dias 01 e 02 de agosto, sábado e domingo, ao vivo nos dois dias.
 - "Preciso saber crochê avançado?": Não. Se já faz suas peças, já tem o que precisa.
 - "Serve pra minha idade?": Serve. Tem aluna de 60, 65 anos vendendo pelo celular. É decisão, não idade.

@@ -23,7 +23,8 @@ const FATOS = `FATOS DA OFERTA (só afirme o que está aqui):
 - Compra pela Hotmart, uma das maiores plataformas do Brasil, segura.
 - +5.000 alunas já passaram comigo.
 - Prova âncora (usar com parcimônia, sem distorcer): Mari, 52 anos, cidade pequena, sem seguidores, fez R$ 12.278 em 4 meses só com o celular.
-- Eu não ensino crochê. Eu ensino a VENDER o crochê que você já sabe fazer.`;
+- Eu não ensino crochê. Eu ensino a VENDER o crochê que você já sabe fazer.
+- O QUE ELA APRENDE na imersão (use quando perguntarem o que vai aprender, o que vai ver, qual o conteúdo): a vender o crochê que já faz, com o celular. Em concreto: como divulgar e vender pela internet começando do zero; como deixar o Instagram com cara de loja que vende, mesmo com poucos seguidores; como criar conteúdo que dá vontade de comprar; como vender pelo WhatsApp sem implorar (com as mensagens prontas); e como precificar do jeito certo pra parar de vender no prejuízo. Tudo prático.`;
 
 const REFRAMES = `REFRAMES DE OBJEÇÃO (use só se ela trouxer; ela é lead quente, não reabra à toa):
 - "Será que vale?": "Não é mais um curso de ponto. São 2 dias de como vender o crochê que você já sabe fazer. Você sai com um plano de ação. E ainda leva a aula de precificação e 20 mensagens prontas pro WhatsApp."
@@ -33,6 +34,7 @@ const REFRAMES = `REFRAMES DE OBJEÇÃO (use só se ela trouxer; ela é lead que
 
 const FAQ = `FAQ (respostas curtas, na minha voz, use se ela perguntar):
 - Como funciona: "São 2 dias ao vivo, online, de casa, pelo celular ou computador. Eu te mostro o que fazer, como fazer e quando fazer pra vender o crochê que você já sabe."
+- O que vou aprender / o que vou ver / qual o conteúdo: "Você vai aprender a vender o crochê que já faz, amiga. Como divulgar pela internet, como deixar seu Instagram com cara de loja que vende, como vender pelo WhatsApp sem ficar implorando, e como precificar do jeito certo pra parar de vender no prejuízo. Tudo no seu celular, bem prático." (Liste o conteúdo, não só os bônus. Pode fechar com uma pergunta curta.)
 - Quando é / que horas: "Dias 01 e 02 de agosto, sábado e domingo. Começa 9h, para pro almoço meio-dia, volta 14h e encerra 17h. Igual nos dois dias."
 - Precisa saber crochê avançado: "Não. Se você já faz suas peças, já tem o que precisa. Eu ensino a vender o crochê que você já sabe."
 - Serve pra minha idade: "Serve. Tenho aluna de 60, 65 anos vendendo pelo celular. Não é idade, é decisão."
