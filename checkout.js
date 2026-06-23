@@ -16,20 +16,22 @@ const LOTES = [
 ];
 
 const GRUPO_ALUNAS = "https://sndflw.com/i/2TWe3MH8E23R3NkYK3Ik"; // só pós-pagamento
+const SCK = "recuperador"; // atribuição: marca a venda como vinda do recuperador (relatório SCK da Hotmart)
 
 function linkByOff(off) { return `https://pay.hotmart.com/${PRODUTO_INGRESSO}?off=${off}`; }
+function withSck(url) { return url + (url.includes("?") ? "&" : "?") + "sck=" + SCK; }
 
-// Link de pagamento do lead. Prioridade: offer code exato da Hotmart → casa por valor →
-// link base (oferta padrão vigente). Mentoria: sem link ainda → null.
+// Link de pagamento do lead, com SCK de atribuição. Prioridade: offer code exato da Hotmart →
+// casa por valor → link base (oferta padrão vigente). Mentoria: sem link ainda → null.
 function checkoutLink(lead) {
-  if (!lead) return `https://pay.hotmart.com/${PRODUTO_INGRESSO}`;
+  if (!lead) return withSck(`https://pay.hotmart.com/${PRODUTO_INGRESSO}`);
   if (lead.product === "mentoria") return null;
-  if (lead.offer) return linkByOff(lead.offer);                 // exato, vindo da Hotmart
+  if (lead.offer) return withSck(linkByOff(lead.offer));        // exato, vindo da Hotmart
   if (lead.value > 0) {
     const exato = LOTES.find(l => Math.abs(l.value - lead.value) < 0.01);
-    if (exato) return linkByOff(exato.off);
+    if (exato) return withSck(linkByOff(exato.off));
   }
-  return `https://pay.hotmart.com/${PRODUTO_INGRESSO}`;         // fallback: oferta vigente
+  return withSck(`https://pay.hotmart.com/${PRODUTO_INGRESSO}`); // fallback: oferta vigente
 }
 
 // Preço do INGRESSO ("R$ 14,90") a partir do valor detectado. {{VALOR}} só aparece em
