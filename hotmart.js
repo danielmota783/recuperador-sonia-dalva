@@ -41,7 +41,13 @@ async function pendingPayments(productId, sinceMs = 24 * 3600 * 1000) {
   const byTx = {};
   for (const it of (hist.items || [])) {
     const tx = (it.purchase && it.purchase.transaction) || it.transaction;
-    byTx[tx] = { type: (it.purchase && it.purchase.payment || {}).type, value: (it.purchase && it.purchase.price || {}).value || 0, productId: it.product && it.product.id };
+    const offer = (it.purchase && it.purchase.offer) || {};
+    byTx[tx] = {
+      type: (it.purchase && it.purchase.payment || {}).type,
+      value: (it.purchase && it.purchase.price || {}).value || 0,
+      productId: it.product && it.product.id,
+      offer: offer.code || offer.key || null, // código do lote (?off=) pra mandar a lead pro lote certo
+    };
   }
 
   const out = [];
@@ -60,6 +66,7 @@ async function pendingPayments(productId, sinceMs = 24 * 3600 * 1000) {
       email: u.email || null,
       paymentType: meta.type || null,        // PIX | BILLET | ...
       value: meta.value || 0,
+      offer: meta.offer || null,             // código do lote (?off=)
       productId: (it.product && it.product.id) || meta.productId || null,
     });
   }

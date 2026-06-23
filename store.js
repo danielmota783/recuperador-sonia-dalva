@@ -32,6 +32,7 @@ function upsertLead(partial, ts) {
       product: partial.product || "ingresso",      // ingresso | mentoria
       gatilho: partial.gatilho || "ingresso_abandono",
       value: partial.value || 0,
+      offer: partial.offer || null,                  // código do lote (?off=) pra link do checkout
       sck: partial.sck || null,                      // atribuição de recuperação
       state: "DETECTADO",
       optout: false,
@@ -46,7 +47,7 @@ function upsertLead(partial, ts) {
     };
   } else {
     // só preenche campos novos sem apagar histórico
-    for (const k of ["firstName", "product", "gatilho", "value", "sck"]) {
+    for (const k of ["firstName", "product", "gatilho", "value", "offer", "sck"]) {
       if (partial[k] != null && (existing[k] == null || existing[k] === "" || existing[k] === 0)) existing[k] = partial[k];
     }
     existing.updatedAt = nowISO(ts);

@@ -120,7 +120,7 @@ async function runRecoveryPoll() {
         const ptype = PRODUCT_MAP[String(rec.productId)] || "ingresso";
         const method = String(rec.paymentType || "PIX").toUpperCase().includes("BILLET") ? "boleto" : "pix";
         const gatilho = `${ptype}_${method}`;
-        store.upsertLead({ phone, firstName: rec.firstName, product: ptype, gatilho, value: rec.value, sck: "recuperacao" }, now);
+        store.upsertLead({ phone, firstName: rec.firstName, product: ptype, gatilho, value: rec.value, offer: rec.offer, sck: "recuperacao" }, now);
         novos.push({ phone, nome: rec.firstName, gatilho, transacao: rec.transaction });
         // 1º toque automático (só pix por enquanto, e só se a trava estiver ligada)
         if (FIRST_TOUCH && gatilho === "ingresso_pix") {
@@ -263,7 +263,7 @@ const server = http.createServer(async (req, res) => {
       // re-busca o lead pra incluir a msg recem-adicionada; historico SEMPRE termina em user
       lead = store.getLead(phone);
       const history = lead.messages.map(m => ({ role: m.role, content: m.content }));
-      const reply = await callClaude(systemPrompt(lead.gatilho), history);
+      const reply = await callClaude(systemPrompt(lead.gatilho, lead), history);
       store.appendMessage(phone, "assistant", reply, now);
       const st = escalated(reply) ? "escalado" : "em_conversa";
       store.setState(phone, st === "escalado" ? "ESCALADO" : "EM_CONVERSA", now);
