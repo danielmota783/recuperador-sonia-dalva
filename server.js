@@ -42,7 +42,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "followup-digest-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "digest-onemsg"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 async function callClaude(system, messages) {
   if (!API_KEY) throw new Error("ANTHROPIC_API_KEY ausente no ambiente");
@@ -375,11 +375,11 @@ function buildDigest(now) {
   const recHoje = leads.filter(l => l.recoveredAt && brtYMD(Date.parse(l.recoveredAt)) === today);
   const fatHoje = recHoje.reduce((s, l) => s + (l.recoveredValue || 0), 0);
   const [Y, Mo, D] = today.split("-");
+  // SEM linhas em branco (\n\n) — o SendFlow quebra em mensagens separadas a cada parágrafo.
   return [
     `📊 Recuperador IREC 2 — ${D}/${Mo}`,
-    ``,
     `*Hoje:* ${novosHoje} detectados · ${recHoje.length} recuperados (${brl(fatHoje)})`,
-    ``,
+    `———`,
     `*Acumulado:*`,
     `• Detectados: ${m.detectados}`,
     `• Abordados: ${m.abordados}`,
