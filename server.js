@@ -42,7 +42,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "vocativo-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "env-diag"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 async function callClaude(system, messages) {
   if (!API_KEY) throw new Error("ANTHROPIC_API_KEY ausente no ambiente");
@@ -175,6 +175,11 @@ const server = http.createServer(async (req, res) => {
         anthropicSet: !!API_KEY,
         manychatSet: !!ENV.MANYCHAT_API_TOKEN,
         hotmartSet: !!(ENV.HOTMART_CLIENT_ID && ENV.HOTMART_CLIENT_SECRET),
+        firstTouchEnabled: ENV.FIRST_TOUCH_ENABLED === "true",   // 1º toque automático
+        flowNsPixSet: !!FLOW_NS_PIX,
+        followupEnabled: ENV.FOLLOWUP_ENABLED === "true",
+        digestEnabled: ENV.DIGEST_ENABLED === "true",
+        sendflowKeySet: !!(process.env.SENDFLOW_API_KEY || ENV.SENDFLOW_API_KEY),
         leads: store.allLeads().length,
         lastError,
       });
