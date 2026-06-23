@@ -42,7 +42,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "digest-onemsg"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "digest-2359"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 async function callClaude(system, messages) {
   if (!API_KEY) throw new Error("ANTHROPIC_API_KEY ausente no ambiente");
@@ -362,7 +362,8 @@ if (FOLLOWUP_ENABLED) {
 // --- DIGEST DIÁRIO (resumo de métricas no WhatsApp do Daniel, via SendFlow) ---
 const DIGEST_ENABLED = ENV.DIGEST_ENABLED === "true";
 const DIGEST_TO = ENV.DIGEST_TO || "5599991202143";       // Daniel
-const DIGEST_HOUR = Number(ENV.DIGEST_HOUR || 20);        // 20h BRT
+const DIGEST_HOUR = Number(ENV.DIGEST_HOUR || 23);        // 23h...
+const DIGEST_MIN = Number(ENV.DIGEST_MIN || 59);          // ...:59 BRT (fecha o dia todo)
 let lastDigestYMD = null;
 function brtYMD(ms) { return new Date(ms - 3 * 3600000).toISOString().slice(0, 10); }
 function brl(v) { return "R$ " + Number(v || 0).toFixed(2).replace(".", ","); }
@@ -394,7 +395,7 @@ function buildDigest(now) {
 async function maybeSendDigest() {
   if (!DIGEST_ENABLED) return;
   const now = Date.now();
-  if (horaBRT(now) !== DIGEST_HOUR) return;
+  if (horaBRT(now) !== DIGEST_HOUR || new Date(now).getUTCMinutes() < DIGEST_MIN) return; // só no :59
   const ymd = brtYMD(now);
   if (lastDigestYMD === ymd) return;       // já enviou hoje
   lastDigestYMD = ymd;
@@ -403,8 +404,8 @@ async function maybeSendDigest() {
 }
 
 if (DIGEST_ENABLED) {
-  setInterval(() => maybeSendDigest().catch(e => console.warn("[digest]", e.message)), 10 * 60 * 1000);
-  console.log(`[digest] digest diário ATIVO (${DIGEST_HOUR}h BRT → ${DIGEST_TO})`);
+  setInterval(() => maybeSendDigest().catch(e => console.warn("[digest]", e.message)), 60 * 1000); // 1 min, pra acertar o :59
+  console.log(`[digest] digest diário ATIVO (${DIGEST_HOUR}:${String(DIGEST_MIN).padStart(2, "0")} BRT → ${DIGEST_TO})`);
 } else {
   console.warn("[digest] digest DESLIGADO (DIGEST_ENABLED!=true)");
 }
