@@ -41,7 +41,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "sck-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "followup-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 async function callClaude(system, messages) {
   if (!API_KEY) throw new Error("ANTHROPIC_API_KEY ausente no ambiente");
@@ -184,6 +184,12 @@ const server = http.createServer(async (req, res) => {
       const r = await runRecoveryPoll();
       return send(res, 200, { ok: true, ...r });
     }
+    if (req.method === "GET" && url === "/api/_followups") {
+      const key = new URLSearchParams(req.url.split("?")[1] || "").get("key");
+      if (key !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
+      const r = await runFollowups();
+      return send(res, 200, { ok: true, ...r });
+    }
     if (req.method === "GET" && url === "/api/_firsttouch") {
       const q = new URLSearchParams(req.url.split("?")[1] || "");
       if (q.get("key") !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
@@ -289,4 +295,55 @@ if (ENV.HOTMART_CLIENT_ID && ENV.HOTMART_CLIENT_SECRET) {
   console.log(`[poll] vigia de pix/boleto pendente ATIVO a cada ${POLL_MIN} min`);
 } else {
   console.warn("[poll] HOTMART_CLIENT_ID/SECRET ausentes — vigia desligado");
+}
+
+// --- RÉGUA DE FOLLOW-UP (2º e 3º toque pra quem recebeu o 1º toque e não respondeu) ---
+// Decisão 23/06: 1º toque → 2º (preço vigente) → 3º (link Lote 01 R$14,90) → para.
+const FOLLOWUP_ENABLED = ENV.FOLLOWUP_ENABLED === "true";          // trava: só roda quando ligado
+const FLOW_NS_FOLLOWUP_2 = ENV.FLOW_NS_FOLLOWUP_2 || null;         // fluxo ManyChat do template irec_ingresso_pendente_2
+const FLOW_NS_FOLLOWUP_3 = ENV.FLOW_NS_FOLLOWUP_3 || null;         // fluxo ManyChat do template irec_ingresso_pendente_3
+const FU2_DELAY_H = Number(ENV.FU2_DELAY_H || 3);                  // horas após o 1º toque
+const FU3_DELAY_H = Number(ENV.FU3_DELAY_H || 20);                 // horas após o 2º toque
+const FU_INTERVAL_MIN = Number(ENV.FU_INTERVAL_MIN || 15);         // de quanto em quanto varre
+const FU_HOUR_START = Number(ENV.FU_HOUR_START || 8);              // só dispara entre 8h...
+const FU_HOUR_END = Number(ENV.FU_HOUR_END || 21);                 // ...e 21h BRT
+function horaBRT(ms) { return (new Date(ms).getUTCHours() + 24 - 3) % 24; }
+
+async function runFollowups() {
+  if (!FOLLOWUP_ENABLED) return { skip: "desligado" };
+  const now = Date.now();
+  const h = horaBRT(now);
+  if (h < FU_HOUR_START || h >= FU_HOUR_END) return { skip: `fora do horario (${h}h BRT)` };
+  const enviados = [];
+  for (const lead of store.allLeads()) {
+    if (lead.optout || lead.respondedAt) continue;     // respondeu ou saiu → fora da régua (cai na conversa)
+    if (lead.state !== "ABORDADO") continue;           // só quem recebeu 1º toque e segue mudo
+    const count = lead.followupCount || 0;
+    const baseISO = count === 0 ? lead.firstTouchAt : lead.lastFollowupAt;
+    if (!baseISO) continue;
+    const horas = (now - Date.parse(baseISO)) / 3600000;
+    try {
+      if (count === 0 && horas >= FU2_DELAY_H && FLOW_NS_FOLLOWUP_2) {
+        await manychat.firstTouch({ phone: lead.phone, firstName: lead.firstName, flowNs: FLOW_NS_FOLLOWUP_2 });
+        store.recordFollowup(lead.phone, 1, now);
+        enviados.push({ phone: lead.phone, toque: 2 });
+      } else if (count === 1 && horas >= FU3_DELAY_H && FLOW_NS_FOLLOWUP_3) {
+        await manychat.firstTouch({ phone: lead.phone, firstName: lead.firstName, flowNs: FLOW_NS_FOLLOWUP_3 });
+        store.recordFollowup(lead.phone, 2, now);
+        enviados.push({ phone: lead.phone, toque: 3 });
+      } else if (count >= 2 && horas >= FU3_DELAY_H) {
+        store.setState(lead.phone, "PERDIDO", now);     // esgotou a régua sem resposta
+        enviados.push({ phone: lead.phone, toque: "perdido" });
+      }
+    } catch (e) { console.warn("[followup]", lead.phone, e.message); }
+  }
+  if (enviados.length) console.log("[followup]", JSON.stringify(enviados));
+  return { enviados };
+}
+
+if (FOLLOWUP_ENABLED) {
+  setInterval(() => runFollowups().catch(e => console.warn("[followup]", e.message)), FU_INTERVAL_MIN * 60 * 1000);
+  console.log(`[followup] régua ATIVA (varre ${FU_INTERVAL_MIN}/${FU_INTERVAL_MIN}min; 2º toque +${FU2_DELAY_H}h, 3º toque +${FU3_DELAY_H}h, ${FU_HOUR_START}-${FU_HOUR_END}h BRT)`);
+} else {
+  console.warn("[followup] régua DESLIGADA (FOLLOWUP_ENABLED!=true)");
 }
