@@ -8,6 +8,7 @@ const { GATILHOS, systemPrompt } = require("./knowledge");
 const store = require("./store");
 const hotmart = require("./hotmart");
 const manychat = require("./manychat");
+const sendflow = require("./sendflow");
 
 // --- env ---
 function loadEnv() {
@@ -41,7 +42,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "followup-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "followup-digest-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 async function callClaude(system, messages) {
   if (!API_KEY) throw new Error("ANTHROPIC_API_KEY ausente no ambiente");
@@ -189,6 +190,16 @@ const server = http.createServer(async (req, res) => {
       if (key !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
       const r = await runFollowups();
       return send(res, 200, { ok: true, ...r });
+    }
+    if (req.method === "GET" && url === "/api/_digest") {
+      const q = new URLSearchParams(req.url.split("?")[1] || "");
+      if (q.get("key") !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
+      const text = buildDigest(Date.now());
+      if (q.get("send") === "true") {
+        try { await sendflow.sendText(q.get("to") || DIGEST_TO, text); return send(res, 200, { text, sent: true }); }
+        catch (e) { return send(res, 200, { text, sent: false, error: e.message }); }
+      }
+      return send(res, 200, { text, sent: false });
     }
     if (req.method === "GET" && url === "/api/_firsttouch") {
       const q = new URLSearchParams(req.url.split("?")[1] || "");
@@ -346,4 +357,54 @@ if (FOLLOWUP_ENABLED) {
   console.log(`[followup] régua ATIVA (varre ${FU_INTERVAL_MIN}/${FU_INTERVAL_MIN}min; 2º toque +${FU2_DELAY_H}h, 3º toque +${FU3_DELAY_H}h, ${FU_HOUR_START}-${FU_HOUR_END}h BRT)`);
 } else {
   console.warn("[followup] régua DESLIGADA (FOLLOWUP_ENABLED!=true)");
+}
+
+// --- DIGEST DIÁRIO (resumo de métricas no WhatsApp do Daniel, via SendFlow) ---
+const DIGEST_ENABLED = ENV.DIGEST_ENABLED === "true";
+const DIGEST_TO = ENV.DIGEST_TO || "5599991202143";       // Daniel
+const DIGEST_HOUR = Number(ENV.DIGEST_HOUR || 20);        // 20h BRT
+let lastDigestYMD = null;
+function brtYMD(ms) { return new Date(ms - 3 * 3600000).toISOString().slice(0, 10); }
+function brl(v) { return "R$ " + Number(v || 0).toFixed(2).replace(".", ","); }
+
+function buildDigest(now) {
+  const leads = store.allLeads();
+  const m = store.metrics();
+  const today = brtYMD(now);
+  const novosHoje = leads.filter(l => l.createdAt && brtYMD(Date.parse(l.createdAt)) === today).length;
+  const recHoje = leads.filter(l => l.recoveredAt && brtYMD(Date.parse(l.recoveredAt)) === today);
+  const fatHoje = recHoje.reduce((s, l) => s + (l.recoveredValue || 0), 0);
+  const [Y, Mo, D] = today.split("-");
+  return [
+    `📊 Recuperador IREC 2 — ${D}/${Mo}`,
+    ``,
+    `*Hoje:* ${novosHoje} detectados · ${recHoje.length} recuperados (${brl(fatHoje)})`,
+    ``,
+    `*Acumulado:*`,
+    `• Detectados: ${m.detectados}`,
+    `• Abordados: ${m.abordados}`,
+    `• Responderam: ${m.responderam} (${m.taxa_resposta}%)`,
+    `• Em conversa: ${m.em_conversa}`,
+    `• Recuperados: ${m.recuperados} (${m.taxa_recuperacao}%)`,
+    `• Perdidos: ${m.perdidos} · Escalados: ${m.escalados} · Saíram: ${m.optouts}`,
+    `• Faturamento recuperado: ${brl(m.faturamento_recuperado)}`,
+  ].join("\n");
+}
+
+async function maybeSendDigest() {
+  if (!DIGEST_ENABLED) return;
+  const now = Date.now();
+  if (horaBRT(now) !== DIGEST_HOUR) return;
+  const ymd = brtYMD(now);
+  if (lastDigestYMD === ymd) return;       // já enviou hoje
+  lastDigestYMD = ymd;
+  try { await sendflow.sendText(DIGEST_TO, buildDigest(now)); console.log("[digest] enviado pro", DIGEST_TO); }
+  catch (e) { lastDigestYMD = null; console.warn("[digest]", e.message); } // libera retry no próximo tick
+}
+
+if (DIGEST_ENABLED) {
+  setInterval(() => maybeSendDigest().catch(e => console.warn("[digest]", e.message)), 10 * 60 * 1000);
+  console.log(`[digest] digest diário ATIVO (${DIGEST_HOUR}h BRT → ${DIGEST_TO})`);
+} else {
+  console.warn("[digest] digest DESLIGADO (DIGEST_ENABLED!=true)");
 }
