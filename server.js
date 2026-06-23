@@ -42,7 +42,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "digest-2359"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "reset-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 async function callClaude(system, messages) {
   if (!API_KEY) throw new Error("ANTHROPIC_API_KEY ausente no ambiente");
@@ -220,14 +220,18 @@ const server = http.createServer(async (req, res) => {
       const gatilho = GATILHOS[q.get("gatilho")] ? q.get("gatilho") : "ingresso_pix";
       const product = gatilho.startsWith("mentoria") ? "mentoria" : "ingresso";
       const fire = q.get("fire") !== "false"; // por padrão dispara o template
+      const reset = q.get("reset") === "true";  // zera o lead (conversa limpa) antes de recriar
       if (!phone) return send(res, 400, { error: "phone obrigatório" });
-      store.upsertLead({ phone, firstName: name, product, gatilho, value: Number(q.get("value") || 0), sck: "teste" }, now);
+      if (reset) store.deleteLead(phone); // apaga histórico → lead nasce do zero com o gatilho pedido
+      store.upsertLead({ phone, firstName: name, product, gatilho, value: Number(q.get("value") || 0), offer: q.get("offer") || null, sck: "teste" }, now);
       let ft = null;
       if (fire) {
         try { const id = await manychat.firstTouch({ phone, firstName: name, flowNs: FLOW_NS_PIX }); store.setState(phone, "ABORDADO", now, { firstTouch: true }); ft = { ok: true, subscriberId: id }; }
         catch (e) { ft = { ok: false, error: e.message }; }
+      } else if (reset) {
+        store.setState(phone, "ABORDADO", now, { firstTouch: true }); // marca como já abordado, pronto pra conversar
       }
-      return send(res, 200, { ok: true, phone, gatilho, firstTouch: ft });
+      return send(res, 200, { ok: true, phone, gatilho, reset, firstTouch: ft });
     }
 
     // --- SIMULADOR (stateless) — mantém a bancada de teste do cérebro ---

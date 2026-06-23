@@ -60,6 +60,16 @@ function upsertLead(partial, ts) {
 
 function getLead(phone) { return load().leads[normPhone(phone)] || null; }
 
+// Apaga um lead (usado pra zerar testes — conversa limpa).
+function deleteLead(phone) {
+  const db = load();
+  const k = normPhone(phone);
+  if (!db.leads[k]) return false;
+  delete db.leads[k];
+  persist(db);
+  return true;
+}
+
 function appendMessage(phone, role, content, ts) {
   const db = load();
   const lead = db.leads[normPhone(phone)];
@@ -132,4 +142,4 @@ function metrics() {
   return m;
 }
 
-module.exports = { upsertLead, getLead, appendMessage, setState, markRecovered, recordFollowup, allLeads, metrics, normPhone };
+module.exports = { upsertLead, getLead, deleteLead, appendMessage, setState, markRecovered, recordFollowup, allLeads, metrics, normPhone };
