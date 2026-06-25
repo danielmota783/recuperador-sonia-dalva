@@ -42,7 +42,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "widget-ux"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "cors-green-mobile"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 async function callClaude(system, messages) {
   if (!API_KEY) throw new Error("ANTHROPIC_API_KEY ausente no ambiente");
@@ -57,7 +57,14 @@ async function callClaude(system, messages) {
 }
 
 function send(res, code, body, type = "application/json") {
-  res.writeHead(code, { "content-type": type, "cache-control": "no-store", "access-control-allow-origin": "*" });
+  res.writeHead(code, {
+    "content-type": type,
+    "cache-control": "no-store",
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+    "access-control-allow-headers": "Content-Type",
+    "access-control-max-age": "86400",
+  });
   res.end(typeof body === "string" ? body : JSON.stringify(body));
 }
 function readJson(req) {
@@ -152,6 +159,8 @@ async function runRecoveryPoll() {
 const server = http.createServer(async (req, res) => {
   try {
     const url = req.url.split("?")[0];
+
+    if (req.method === "OPTIONS") return send(res, 204, ""); // CORS preflight (widget cross-origin)
 
     if (req.method === "GET" && (url === "/" || url === "/index.html"))
       return send(res, 200, fs.readFileSync(path.join(__dirname, "public", "index.html"), "utf8"), "text/html; charset=utf-8");
