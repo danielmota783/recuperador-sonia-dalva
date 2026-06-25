@@ -16,10 +16,14 @@ const LOTES = [
 ];
 
 const GRUPO_ALUNAS = "https://sndflw.com/i/2TWe3MH8E23R3NkYK3Ik"; // só pós-pagamento
-const SCK = "recuperador"; // atribuição: marca a venda como vinda do recuperador (relatório SCK da Hotmart)
+const SCK = "recuperador";      // venda vinda do recuperador (WhatsApp)
+const SCK_PAGINA = "rosa_pagina"; // venda vinda do chat da Rosa na página de vendas
 
 function linkByOff(off) { return `https://pay.hotmart.com/${PRODUTO_INGRESSO}?off=${off}`; }
-function withSck(url) { return url + (url.includes("?") ? "&" : "?") + "sck=" + SCK; }
+function withSck(url, sck) { return url + (url.includes("?") ? "&" : "?") + "sck=" + (sck || SCK); }
+
+// Link do checkout pro chat da PÁGINA (visitante sem lote definido → oferta vigente, atribuição da página).
+function pageLink() { return withSck(`https://pay.hotmart.com/${PRODUTO_INGRESSO}`, SCK_PAGINA); }
 
 // Link de pagamento do lead, com SCK de atribuição. Prioridade: offer code exato da Hotmart →
 // casa por valor → link base (oferta padrão vigente). Mentoria: sem link ainda → null.
@@ -42,4 +46,4 @@ function priceLabel(lead) {
   return "R$ " + v.toFixed(2).replace(".", ",");
 }
 
-module.exports = { checkoutLink, priceLabel, GRUPO_ALUNAS, PRODUTO_INGRESSO, LOTES };
+module.exports = { checkoutLink, pageLink, priceLabel, GRUPO_ALUNAS, PRODUTO_INGRESSO, LOTES };

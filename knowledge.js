@@ -138,23 +138,30 @@ const GATILHOS = {
     rotulo: "Mentoria — boleto gerado não pago",
     contexto: "A pessoa gerou boleto da MENTORIA e não pagou. Produto: MENTORIA. Temperatura: quente/morna. Objetivo: lembrar antes do vencimento, oferecer pix.",
     abertura: "Oi, minha filha. Seu boleto da mentoria tá gerado e ainda não foi pago. Antes de vencer, quero saber se você precisa de ajuda."
+  },
+  suporte_pagina: {
+    rotulo: "Suporte na página (pré-venda)",
+    contexto: "Visitante do chat da página de vendas, ainda NÃO comprou. Rosa como suporte: tira dúvida, derruba objeção, guia pra garantir a vaga.",
+    abertura: "Oi! Aqui é a Rosa, do time da Sonia Dalva. Posso te ajudar com alguma dúvida sobre a imersão?"
   }
 };
 
 const PROMPTS = require("./prompts");
 const checkout = require("./checkout");
 
-// Preenche {{VALOR}} (preço real do lote) e {{LINK}} (checkout do lote) por lead.
-function fill(tpl, lead) {
+// Preenche {{VALOR}} (preço real do lote) e {{LINK}} (checkout). linkOverride pro chat da página.
+function fill(tpl, lead, linkOverride) {
   const valor = checkout.priceLabel(lead);
-  const link = checkout.checkoutLink(lead);
+  const link = linkOverride || checkout.checkoutLink(lead);
   return tpl
     .split("{{VALOR}}").join(valor)
     .split("{{LINK}}").join(link || "o link da sua compra");
 }
 
 function systemPrompt(gatilhoKey, lead) {
-  // prompts blindados dedicados (voz Sonia + anti-erro verificado, link/preço por lote)
+  // chat da página de vendas (pré-venda) — Rosa suporte, link da página
+  if (gatilhoKey === "suporte_pagina") return fill(PROMPTS.SUPORTE, null, checkout.pageLink());
+  // prompts blindados dedicados (voz Rosa + anti-erro verificado, link/preço por lote)
   if (gatilhoKey === "ingresso_pix") return fill(PROMPTS.PIX, lead);
   if (gatilhoKey === "ingresso_boleto") return fill(PROMPTS.BOLETO, lead);
   if (gatilhoKey === "ingresso_cartao") return fill(PROMPTS.CARTAO, lead);

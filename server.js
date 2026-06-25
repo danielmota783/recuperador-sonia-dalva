@@ -42,7 +42,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "rosa-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "widget-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 async function callClaude(system, messages) {
   if (!API_KEY) throw new Error("ANTHROPIC_API_KEY ausente no ambiente");
@@ -66,8 +66,19 @@ function readJson(req) {
     req.on("end", () => { try { resolve(JSON.parse(raw || "{}")); } catch { resolve({}); } });
   });
 }
-function escalated(reply) { return /pessoa da minha equipe te chamar/i.test(reply); }
+function escalated(reply) { return /pessoa da (minha )?equipe te chamar/i.test(reply); }
 function isOptout(text) { return /^\s*sair\s*$/i.test(text || ""); }
+
+// rate limit simples por IP pro chat público (widget da página) — anti-abuso/custo
+const chatHits = new Map();
+function chatRateLimited(ip) {
+  const now = Date.now(), win = 5 * 60 * 1000, max = 40;
+  const arr = (chatHits.get(ip) || []).filter(t => now - t < win);
+  arr.push(now);
+  chatHits.set(ip, arr);
+  if (chatHits.size > 5000) chatHits.clear(); // backstop de memória
+  return arr.length > max;
+}
 
 // garante E.164 do Brasil (prefixo 55) pro WhatsApp
 function toE164BR(p) {
@@ -146,6 +157,10 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, fs.readFileSync(path.join(__dirname, "public", "index.html"), "utf8"), "text/html; charset=utf-8");
     if (req.method === "GET" && url === "/crm")
       return send(res, 200, fs.readFileSync(path.join(__dirname, "public", "crm.html"), "utf8"), "text/html; charset=utf-8");
+    if (req.method === "GET" && url === "/widget.js")
+      return send(res, 200, fs.readFileSync(path.join(__dirname, "public", "widget.js"), "utf8"), "application/javascript; charset=utf-8");
+    if (req.method === "GET" && url === "/suporte")
+      return send(res, 200, fs.readFileSync(path.join(__dirname, "public", "suporte.html"), "utf8"), "text/html; charset=utf-8");
     if (req.method === "GET" && url === "/api/gatilhos")
       return send(res, 200, Object.entries(GATILHOS).map(([k, v]) => ({ key: k, rotulo: v.rotulo, abertura: v.abertura })));
     if (req.method === "GET" && url === "/api/metrics")
@@ -239,10 +254,14 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok: true, phone, gatilho, reset, firstTouch: ft });
     }
 
-    // --- SIMULADOR (stateless) — mantém a bancada de teste do cérebro ---
+    // --- CHAT STATELESS — simulador interno + widget público da Rosa na página ---
     if (req.method === "POST" && url === "/api/chat") {
+      const ip = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() || (req.socket && req.socket.remoteAddress) || "?";
+      if (chatRateLimited(ip)) return send(res, 429, { error: "Muitas mensagens em pouco tempo. Tenta de novo daqui a pouquinho." });
       const { gatilho, messages } = await readJson(req);
       if (!GATILHOS[gatilho]) return send(res, 400, { error: "gatilho inválido" });
+      if (!Array.isArray(messages) || messages.length > 40) return send(res, 400, { error: "conversa muito longa" });
+      if (messages.some(m => typeof (m && m.content) === "string" && m.content.length > 1500)) return send(res, 400, { error: "mensagem muito longa" });
       const lastUser = [...(messages || [])].reverse().find(m => m.role === "user");
       if (lastUser && isOptout(lastUser.content))
         return send(res, 200, { reply: "Tudo bem, amiga. Não te chamo mais por aqui. Qualquer dia que quiser, é só me responder. Um beijo.", status: "optout" });
