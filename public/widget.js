@@ -31,6 +31,7 @@
     + '.rosa-msg{max-width:82%;padding:10px 13px;border-radius:15px;font-size:14.5px;line-height:1.45;white-space:pre-wrap;word-wrap:break-word}'
     + '.rosa-assistant{align-self:flex-start;background:#fff;color:#3a2e28;border:1px solid #ece3d6;border-bottom-left-radius:5px}'
     + '.rosa-user{align-self:flex-end;background:#c2683d;color:#fff;border-bottom-right-radius:5px}'
+    + '.rosa-msg a{color:#c2683d;font-weight:600;word-break:break-word}.rosa-user a{color:#fff}.rosa-msg strong{font-weight:700}'
     + '.rosa-typing{display:flex;gap:4px;align-items:center}'
     + '.rosa-typing span{width:7px;height:7px;border-radius:50%;background:#c2a48f;animation:rosablink 1.2s infinite both}'
     + '.rosa-typing span:nth-child(2){animation-delay:.2s}.rosa-typing span:nth-child(3){animation-delay:.4s}'
@@ -65,8 +66,13 @@
       input = panel.querySelector("input"), sendBtn = panel.querySelector('button[type="submit"]');
 
   function esc(t) { var d = document.createElement("div"); d.textContent = t; return d.innerHTML; }
+  function fmt(t) { // escapa (anti-injeção) → links clicáveis → **negrito**
+    return esc(t)
+      .replace(/(https?:\/\/[^\s<]+)/g, function (u) { return '<a href="' + u + '" target="_blank" rel="noopener noreferrer">' + u + '</a>'; })
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  }
   function add(role, text) {
-    var d = document.createElement("div"); d.className = "rosa-msg rosa-" + role; d.textContent = text;
+    var d = document.createElement("div"); d.className = "rosa-msg rosa-" + role; d.innerHTML = fmt(text);
     msgs.appendChild(d); msgs.scrollTop = msgs.scrollHeight; return d;
   }
   function typing(on) {
@@ -78,6 +84,17 @@
   function close() { panel.style.display = "none"; launch.style.display = "flex"; }
   launch.onclick = open; panel.querySelector(".rosa-x").onclick = close;
 
+  // mostra a resposta com um leve atraso proporcional ao tamanho do texto (parece que a Rosa digitou)
+  function reveal(reply, isError) {
+    var extra = isError ? 0 : Math.min(1500, Math.max(0, (String(reply).length - 40) * 12)); // só em respostas reais; texto curto não atrasa
+    setTimeout(function () {
+      typing(false);
+      add("assistant", reply);
+      if (!isError) history.push({ role: "assistant", content: reply });
+      busy = false; sendBtn.disabled = false; input.focus();
+    }, extra);
+  }
+
   form.addEventListener("submit", function (e) {
     e.preventDefault(); if (busy) return;
     var text = (input.value || "").trim(); if (!text) return;
@@ -85,12 +102,7 @@
     busy = true; sendBtn.disabled = true; typing(true);
     fetch(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gatilho: GATILHO, messages: history }) })
       .then(function (r) { return r.json().catch(function(){ return {}; }); })
-      .then(function (d) {
-        typing(false);
-        var reply = (d && d.reply) || "Tive um probleminha aqui. Pode escrever de novo?";
-        add("assistant", reply); history.push({ role: "assistant", content: reply });
-      })
-      .catch(function () { typing(false); add("assistant", "Tive um probleminha de conexão. Tenta de novo em instantes?"); })
-      .then(function () { busy = false; sendBtn.disabled = false; input.focus(); });
+      .then(function (d) { reveal((d && d.reply) || "Tive um probleminha aqui. Pode escrever de novo?", false); })
+      .catch(function () { reveal("Tive um probleminha de conexão. Tenta de novo em instantes?", true); });
   });
 })();
