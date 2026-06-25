@@ -85,8 +85,31 @@
     if (on) { var d = document.createElement("div"); d.className = "rosa-msg rosa-assistant rosa-typing rosa-typing-wrap";
       d.innerHTML = "<span></span><span></span><span></span>"; msgs.appendChild(d); msgs.scrollTop = msgs.scrollHeight; }
   }
-  function open() { panel.style.display = "flex"; launch.style.display = "none"; if (!opened) { opened = true; add("assistant", GREETING); } setTimeout(function(){ input.focus(); }, 50); }
+  // No mobile, ajusta o painel à área visível REAL (acima do teclado) — resolve o campo "no meio da tela"
+  function fitViewport() {
+    if (panel.style.display === "none") return;
+    if (window.innerWidth > 480 || !window.visualViewport) { // desktop ou sem suporte: deixa o CSS cuidar
+      panel.style.top = ""; panel.style.left = ""; panel.style.height = ""; panel.style.bottom = ""; return;
+    }
+    var vv = window.visualViewport;
+    panel.style.top = vv.offsetTop + "px";
+    panel.style.left = vv.offsetLeft + "px";
+    panel.style.height = vv.height + "px";
+    panel.style.bottom = "auto";
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", fitViewport);
+    window.visualViewport.addEventListener("scroll", fitViewport);
+  }
+  function open() {
+    panel.style.display = "flex"; launch.style.display = "none";
+    if (!opened) { opened = true; add("assistant", GREETING); }
+    fitViewport();
+    if (window.innerWidth > 480) setTimeout(function () { input.focus(); }, 50); // auto-foco só no desktop (no mobile evita abrir teclado de cara)
+  }
   function close() { panel.style.display = "none"; launch.style.display = "flex"; }
+  input.addEventListener("focus", function () { setTimeout(fitViewport, 100); });
   launch.onclick = open; panel.querySelector(".rosa-x").onclick = close;
 
   // mostra a resposta com um leve atraso proporcional ao tamanho do texto (parece que a Rosa digitou)
