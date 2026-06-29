@@ -42,7 +42,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "mobile-vv"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "lote-zero"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 async function callClaude(system, messages) {
   if (!API_KEY) throw new Error("ANTHROPIC_API_KEY ausente no ambiente");
@@ -300,14 +300,17 @@ const server = http.createServer(async (req, res) => {
     }
 
     // --- CONVERSA STATEFUL: contrato do External Request do ManyChat ---
-    // body: { phone, firstName?, text }  → { reply, status }
+    // body: { phone, firstName?, text, gatilho? }  → { reply, status }
+    // gatilho (opcional): define o modo p/ LEAD NOVO (ex.: "lote_zero" na captação). Lead já existente mantém o dele.
     if (req.method === "POST" && url === "/api/reply") {
       const now = Date.now();
       const body = await readJson(req);
-      const { phone, firstName, text } = body || {};
-      lastReplyHit = { recebidoEm: new Date(now).toISOString(), ua: req.headers["user-agent"] || null, contentType: req.headers["content-type"] || null, body, parsed: { phone: phone || null, firstName: firstName || null, text: text || null } };
+      const { phone, firstName, text, gatilho } = body || {};
+      lastReplyHit = { recebidoEm: new Date(now).toISOString(), ua: req.headers["user-agent"] || null, contentType: req.headers["content-type"] || null, body, parsed: { phone: phone || null, firstName: firstName || null, text: text || null, gatilho: gatilho || null } };
       if (!phone || !text) return send(res, 400, { error: "phone e text obrigatórios", recebido: body });
-      let lead = store.getLead(phone) || store.upsertLead({ phone, firstName, gatilho: "ingresso_abandono", product: "ingresso" }, now);
+      const gNovo = (gatilho && GATILHOS[gatilho]) ? gatilho : "ingresso_abandono";
+      const prodNovo = gNovo.startsWith("mentoria") ? "mentoria" : "ingresso";
+      let lead = store.getLead(phone) || store.upsertLead({ phone, firstName, gatilho: gNovo, product: prodNovo }, now);
       if (lead.optout) return send(res, 200, { reply: "", status: "optout" });
 
       store.appendMessage(phone, "user", text, now);

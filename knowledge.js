@@ -143,6 +143,11 @@ const GATILHOS = {
     rotulo: "Suporte na página (pré-venda)",
     contexto: "Visitante do chat da página de vendas, ainda NÃO comprou. Rosa como suporte: tira dúvida, derruba objeção, guia pra garantir a vaga.",
     abertura: "Oi! Aqui é a Rosa, do time da Sonia Dalva. Posso te ajudar com alguma dúvida sobre a imersão?"
+  },
+  lote_zero: {
+    rotulo: "Lote Zero — captação pro grupo VIP",
+    contexto: "Lead que recebeu o convite do lote zero (disparo) e respondeu. Rosa leva pro GRUPO do lote zero, onde o link de compra no menor preço (R$9,90) é liberado. Ela manda só o link do grupo.",
+    abertura: "Oi! Aqui é a Rosa, do time da Sonia Dalva."
   }
 };
 
@@ -159,6 +164,9 @@ function fill(tpl, lead, linkOverride) {
 }
 
 function systemPrompt(gatilhoKey, lead) {
+  // captação lote zero — Rosa leva pro GRUPO (menor preço R$9,90 cai dentro do grupo)
+  if (gatilhoKey === "lote_zero")
+    return PROMPTS.LOTE_ZERO.split("{{VALOR}}").join(checkout.LOTE_ZERO_VALOR).split("{{GRUPO}}").join(checkout.GRUPO_LOTE_ZERO);
   // chat da página de vendas (pré-venda) — Rosa suporte, link da página
   if (gatilhoKey === "suporte_pagina") return fill(PROMPTS.SUPORTE, null, checkout.pageLink());
   // prompts blindados dedicados (voz Rosa + anti-erro verificado, link/preço por lote)

@@ -16,6 +16,8 @@ const LOTES = [
 ];
 
 const GRUPO_ALUNAS = "https://sndflw.com/i/2TWe3MH8E23R3NkYK3Ik"; // só pós-pagamento
+const GRUPO_LOTE_ZERO = "https://chat.whatsapp.com/J3ZP4N7CyvCAhbTVgJVUv3"; // grupo VIP do lote zero (Rosa manda este)
+const LOTE_ZERO_VALOR = "R$ 9,90"; // menor preço de todos (lote 0); link de compra cai dentro do grupo
 const SCK = "recuperador";      // venda vinda do recuperador (WhatsApp)
 const SCK_PAGINA = "rosa_pagina"; // venda vinda do chat da Rosa na página de vendas
 
@@ -46,4 +48,4 @@ function priceLabel(lead) {
   return "R$ " + v.toFixed(2).replace(".", ",");
 }
 
-module.exports = { checkoutLink, pageLink, priceLabel, GRUPO_ALUNAS, PRODUTO_INGRESSO, LOTES };
+module.exports = { checkoutLink, pageLink, priceLabel, GRUPO_ALUNAS, GRUPO_LOTE_ZERO, LOTE_ZERO_VALOR, PRODUTO_INGRESSO, LOTES };
