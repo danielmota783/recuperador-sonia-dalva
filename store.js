@@ -46,6 +46,7 @@ function upsertLead(partial, ts) {
       escalatedAt: null,
       followupCount: 0,        // 0 = só 1º toque; 1 = mandou 2º toque; 2 = mandou 3º toque
       lastFollowupAt: null,    // ISO do último toque enviado (régua de follow-up)
+      cadence: {},             // passos da régua de lote zero já enviados (ex.: {lz_followup: ISO})
     };
   } else {
     // só preenche campos novos sem apagar histórico
@@ -89,6 +90,18 @@ function setState(phone, state, ts, extra = {}) {
   if (state === "ESCALADO" && !lead.escalatedAt) lead.escalatedAt = nowISO(ts);
   if (extra.optout) lead.optout = true;
   if (extra.firstTouch && !lead.firstTouchAt) lead.firstTouchAt = nowISO(ts);
+  lead.updatedAt = nowISO(ts);
+  persist(db);
+  return lead;
+}
+
+// Marca um passo da régua de lote zero como enviado (idempotente).
+function recordCadence(phone, step, ts) {
+  const db = load();
+  const lead = db.leads[normPhone(phone)];
+  if (!lead) return null;
+  lead.cadence = lead.cadence || {};
+  lead.cadence[step] = nowISO(ts);
   lead.updatedAt = nowISO(ts);
   persist(db);
   return lead;
@@ -142,4 +155,4 @@ function metrics() {
   return m;
 }
 
-module.exports = { upsertLead, getLead, deleteLead, appendMessage, setState, markRecovered, recordFollowup, allLeads, metrics, normPhone };
+module.exports = { upsertLead, getLead, deleteLead, appendMessage, setState, markRecovered, recordFollowup, recordCadence, allLeads, metrics, normPhone };

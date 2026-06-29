@@ -56,12 +56,11 @@ const addTag = (subscriberId, tagId) =>
 const sendFlow = (subscriberId, flowNs) =>
   mc("/fb/sending/sendFlow", "POST", { subscriber_id: subscriberId, flow_ns: flowNs });
 
-// Resposta livre (DENTRO da janela 24h, depois da lead responder): manda texto direto.
+// Resposta livre (DENTRO da janela 24h, depois da lead responder): manda texto direto, sem template.
 const sendText = (subscriberId, text) =>
   mc("/fb/sending/sendContent", "POST", {
     subscriber_id: subscriberId,
     data: { version: "v2", content: { type: "whatsapp", messages: [{ type: "text", text }] } },
-    message_tag: "ACCOUNT_UPDATE",
   });
 
 // 1º toque: acha/cria o assinante pelo telefone e dispara o fluxo (template aprovado).
@@ -74,7 +73,8 @@ function pickId(x) {
   return s && (s.id || s.subscriber_id || (s.subscriber && s.subscriber.id)) || null;
 }
 
-async function firstTouch({ phone, firstName, flowNs }) {
+// Resolve o subscriber id pelo telefone (acha aluna existente; cria se preciso).
+async function resolveId(phone, firstName) {
   const digits = String(phone).replace(/\D/g, "");
   const plus = "+" + digits;
   let id = null;
@@ -89,8 +89,21 @@ async function firstTouch({ phone, firstName, flowNs }) {
     if (id) { try { await setCustomField(id, WHATSAPP_ID_FIELD, plus); } catch (e) { /* nao bloqueia */ } }
   }
   if (!id) throw new Error("ManyChat: nao obteve subscriber id para " + digits);
+  return id;
+}
+
+// 1º toque: acha/cria o assinante e dispara o fluxo (template aprovado).
+async function firstTouch({ phone, firstName, flowNs }) {
+  const id = await resolveId(phone, firstName);
   await sendFlow(id, flowNs);
   return id;
 }
 
-module.exports = { mc, getInfo, findByPhone, findByCustomField, getFlows, createSubscriber, setCustomField, addTag, sendFlow, sendText, firstTouch };
+// Texto livre por telefone (DENTRO da janela 24h): acha o assinante e manda o texto.
+async function sendTextToPhone(phone, text, firstName) {
+  const id = await resolveId(phone, firstName);
+  await sendText(id, text);
+  return id;
+}
+
+module.exports = { mc, getInfo, findByPhone, findByCustomField, getFlows, createSubscriber, setCustomField, addTag, sendFlow, sendText, resolveId, firstTouch, sendTextToPhone };

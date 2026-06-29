@@ -42,7 +42,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "para-formal"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "lz-cadence"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 async function callClaude(system, messages) {
   if (!API_KEY) throw new Error("ANTHROPIC_API_KEY ausente no ambiente");
@@ -218,6 +218,14 @@ const server = http.createServer(async (req, res) => {
       const key = new URLSearchParams(req.url.split("?")[1] || "").get("key");
       if (key !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
       const r = await runFollowups();
+      return send(res, 200, { ok: true, ...r });
+    }
+    if (req.method === "GET" && url === "/api/_cadence") { // teste: força um passo da régua lote zero p/ 1 telefone
+      const q = new URLSearchParams(req.url.split("?")[1] || "");
+      if (q.get("key") !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
+      const step = q.get("step"), phone = q.get("phone");
+      if (!step || !phone) return send(res, 400, { error: "step e phone obrigatórios" });
+      const r = await runLoteZeroCadence(step, phone);
       return send(res, 200, { ok: true, ...r });
     }
     if (req.method === "GET" && url === "/api/_digest") {
@@ -448,4 +456,54 @@ if (DIGEST_ENABLED) {
   console.log(`[digest] digest diário ATIVO (${DIGEST_HOUR}:${String(DIGEST_MIN).padStart(2, "0")} BRT → ${DIGEST_TO})`);
 } else {
   console.warn("[digest] digest DESLIGADO (DIGEST_ENABLED!=true)");
+}
+
+// --- RÉGUA DE LOTE ZERO (mensagens livres agendadas, DENTRO da janela 24h, sem template) ---
+// Decisão Daniel (29/06): 30/06 10h follow-up (gera nova interação) → 01/07 09h disparo do link de vendas.
+const LOTE_ZERO_CADENCE = ENV.LOTE_ZERO_CADENCE_ENABLED === "true"; // trava: só roda quando ligado
+const SALES_LINK_LZ = ENV.SALES_LINK_LZ || "https://pay.hotmart.com/V106097949E?off=ayu3i3k8&sck=lote_zero";
+function brtToMs(s) { // "AAAA-MM-DD HH:MM" em BRT → ms UTC (BRT = UTC-3)
+  const [d, t] = s.split(" "); const [Y, M, D] = d.split("-").map(Number); const [h, mi] = t.split(":").map(Number);
+  return Date.UTC(Y, M - 1, D, h + 3, mi, 0);
+}
+const CADENCE_EVENTS = [
+  { id: "lz_followup", at: brtToMs(ENV.LZ_FOLLOWUP_AT || "2026-06-30 10:00"),
+    msg: (n) => `Oi, ${n}! Passando para te lembrar de uma coisa importante: as inscrições da Imersão Renda Extra com Crochê abrem amanhã, quarta, dia 01/07, às 9h. Quem está no grupo do lote zero garante o menor preço de todos. Me responde aqui com um "EU QUERO" que amanhã, 9h em ponto, eu te mando o link em primeira mão. 💛` },
+  { id: "lz_sales", at: brtToMs(ENV.LZ_SALES_AT || "2026-07-01 09:00"),
+    msg: (n) => `Chegou a hora, ${n}! As inscrições da Imersão Renda Extra com Crochê estão abertas. O lote zero, o menor preço de todos por R$ 9,90, já está no ar — por pouquíssimo tempo. Garante o seu agora: ${SALES_LINK_LZ}` },
+];
+function lastUserTs(lead) {
+  const m = lead.messages || [];
+  for (let i = m.length - 1; i >= 0; i--) if (m[i].role === "user") return Date.parse(m[i].ts);
+  return lead.respondedAt ? Date.parse(lead.respondedAt) : 0;
+}
+// Envia um passo da régua aos leads de lote zero DENTRO da janela 24h. forceId+onlyPhone = teste (ignora gate/janela).
+async function runLoteZeroCadence(forceId, onlyPhone) {
+  const now = Date.now(), JANELA = 24 * 3600 * 1000, GRACE = 3 * 3600 * 1000, CAP = 30;
+  const enviados = [];
+  for (const ev of CADENCE_EVENTS) {
+    if (forceId) { if (ev.id !== forceId) continue; }
+    else if (now < ev.at || now > ev.at + GRACE) continue; // só dentro da janela do evento
+    let sent = 0;
+    for (const lead of store.allLeads()) {
+      if (lead.gatilho !== "lote_zero" || lead.optout) continue;
+      if (onlyPhone && !String(lead.phone).endsWith(String(onlyPhone).replace(/\D/g, "").slice(-8))) continue;
+      if (!forceId && lead.cadence && lead.cadence[ev.id]) continue;      // já enviado
+      if (!onlyPhone && (now - lastUserTs(lead) > JANELA)) continue;       // fora da janela 24h
+      try {
+        await manychat.sendTextToPhone(lead.phone, ev.msg(lead.firstName || "amiga"), lead.firstName);
+        store.recordCadence(lead.phone, ev.id, now);
+        enviados.push({ id: ev.id, phone: lead.phone });
+      } catch (e) { console.warn("[cadence]", ev.id, lead.phone, e.message); }
+      if (++sent >= CAP) break; // throttle por tick
+    }
+  }
+  if (enviados.length) console.log("[cadence]", JSON.stringify(enviados));
+  return { enviados };
+}
+if (LOTE_ZERO_CADENCE) {
+  setInterval(() => runLoteZeroCadence().catch(e => console.warn("[cadence]", e.message)), 60 * 1000);
+  console.log(`[cadence] régua lote zero ATIVA (followup ${ENV.LZ_FOLLOWUP_AT || "2026-06-30 10:00"} BRT · vendas ${ENV.LZ_SALES_AT || "2026-07-01 09:00"} BRT)`);
+} else {
+  console.warn("[cadence] régua lote zero DESLIGADA (LOTE_ZERO_CADENCE_ENABLED!=true)");
 }
