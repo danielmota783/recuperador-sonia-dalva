@@ -42,7 +42,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "lz-cadence-v2"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "lz-cadence-v3"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 async function callClaude(system, messages) {
   if (!API_KEY) throw new Error("ANTHROPIC_API_KEY ausente no ambiente");
@@ -204,7 +204,11 @@ const server = http.createServer(async (req, res) => {
         followupEnabled: ENV.FOLLOWUP_ENABLED === "true",
         digestEnabled: ENV.DIGEST_ENABLED === "true",
         sendflowKeySet: !!(process.env.SENDFLOW_API_KEY || ENV.SENDFLOW_API_KEY),
+        loteZeroCadenceEnabled: ENV.LOTE_ZERO_CADENCE_ENABLED === "true", // régua lote zero (follow-up 30/06 + vendas 01/07)
+        cadenceFollowupAt: (ENV.LZ_FOLLOWUP_AT || "2026-06-30 10:00") + " BRT",
+        cadenceSalesAt: (ENV.LZ_SALES_AT || "2026-07-01 08:00") + " BRT",
         leads: store.allLeads().length,
+        leadsLoteZero: store.allLeads().filter(l => l.gatilho === "lote_zero").length,
         lastError,
       });
     }
