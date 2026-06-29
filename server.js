@@ -42,7 +42,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "lz-cadence-v3"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "lz-cadence-v4"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 async function callClaude(system, messages) {
   if (!API_KEY) throw new Error("ANTHROPIC_API_KEY ausente no ambiente");
@@ -94,6 +94,18 @@ function toE164BR(p) {
   if (d.startsWith("55") && d.length >= 12) return d;
   if (d.length === 10 || d.length === 11) return "55" + d;
   return d;
+}
+
+// Sanitiza o 1º nome p/ mensagem (muitos vêm como email, @handle colado ou com emoji).
+// Tudo que não for nome de gente confiável vira "amiga" — melhor que "Oi, fulano@gmail.com!".
+function cleanName(raw) {
+  let s = String(raw || "").trim();
+  if (!s || /@/.test(s)) return "amiga";                       // vazio ou email
+  s = s.replace(/[^\p{L}\p{M}\s'-]/gu, " ").trim();            // remove emoji/dígitos/símbolos
+  s = (s.split(/\s+/)[0] || "");                               // só o primeiro nome
+  if (s.length < 2 || s.length > 14) return "amiga";           // curto demais OU handle colado
+  if (s.length > 11 && s === s.toLowerCase()) return "amiga";  // blob minúsculo colado
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase(); // Title-case
 }
 
 // --- normaliza payload da Hotmart (shape CONFIRMADO no teste real 19/06; Webhook 2.0) ---
@@ -495,7 +507,7 @@ async function runLoteZeroCadence(forceId, onlyPhone) {
       if (!forceId && lead.cadence && lead.cadence[ev.id]) continue;      // já enviado
       if (!onlyPhone && (now - lastUserTs(lead) > JANELA)) continue;       // fora da janela 24h
       try {
-        await manychat.sendTextToPhone(lead.phone, ev.msg(lead.firstName || "amiga"), lead.firstName);
+        await manychat.sendTextToPhone(lead.phone, ev.msg(cleanName(lead.firstName)), lead.firstName);
         store.recordCadence(lead.phone, ev.id, now);
         enviados.push({ id: ev.id, phone: lead.phone });
       } catch (e) { console.warn("[cadence]", ev.id, lead.phone, e.message); }
