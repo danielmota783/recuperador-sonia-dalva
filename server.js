@@ -42,7 +42,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "lz-cadence"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "lz-cadence-v2"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 async function callClaude(system, messages) {
   if (!API_KEY) throw new Error("ANTHROPIC_API_KEY ausente no ambiente");
@@ -468,9 +468,9 @@ function brtToMs(s) { // "AAAA-MM-DD HH:MM" em BRT → ms UTC (BRT = UTC-3)
 }
 const CADENCE_EVENTS = [
   { id: "lz_followup", at: brtToMs(ENV.LZ_FOLLOWUP_AT || "2026-06-30 10:00"),
-    msg: (n) => `Oi, ${n}! Passando para te lembrar de uma coisa importante: as inscrições da Imersão Renda Extra com Crochê abrem amanhã, quarta, dia 01/07, às 9h. Quem está no grupo do lote zero garante o menor preço de todos. Me responde aqui com um "EU QUERO" que amanhã, 9h em ponto, eu te mando o link em primeira mão. 💛` },
-  { id: "lz_sales", at: brtToMs(ENV.LZ_SALES_AT || "2026-07-01 09:00"),
-    msg: (n) => `Chegou a hora, ${n}! As inscrições da Imersão Renda Extra com Crochê estão abertas. O lote zero, o menor preço de todos por R$ 9,90, já está no ar — por pouquíssimo tempo. Garante o seu agora: ${SALES_LINK_LZ}` },
+    msg: (n) => `Oi, ${n}! Passando para te lembrar de uma coisa importante.\n\nAs inscrições da Imersão Renda Extra com Crochê abrem amanhã, quarta, dia 01/07, às 8h.\n\nQuem está no grupo do lote zero garante o menor preço de todos.\n\nMe responde aqui com um "EU QUERO" que amanhã, 8h em ponto, eu te mando o link em primeira mão. 💛` },
+  { id: "lz_sales", at: brtToMs(ENV.LZ_SALES_AT || "2026-07-01 08:00"),
+    msg: (n) => `Chegou a hora, ${n}!\n\nAs inscrições da Imersão Renda Extra com Crochê estão abertas.\n\nO lote zero, o menor preço de todos por R$ 9,90, já está no ar — por pouquíssimo tempo.\n\nGarante o seu agora:\n${SALES_LINK_LZ}` },
 ];
 function lastUserTs(lead) {
   const m = lead.messages || [];
@@ -503,7 +503,7 @@ async function runLoteZeroCadence(forceId, onlyPhone) {
 }
 if (LOTE_ZERO_CADENCE) {
   setInterval(() => runLoteZeroCadence().catch(e => console.warn("[cadence]", e.message)), 60 * 1000);
-  console.log(`[cadence] régua lote zero ATIVA (followup ${ENV.LZ_FOLLOWUP_AT || "2026-06-30 10:00"} BRT · vendas ${ENV.LZ_SALES_AT || "2026-07-01 09:00"} BRT)`);
+  console.log(`[cadence] régua lote zero ATIVA (followup ${ENV.LZ_FOLLOWUP_AT || "2026-06-30 10:00"} BRT · vendas ${ENV.LZ_SALES_AT || "2026-07-01 08:00"} BRT)`);
 } else {
   console.warn("[cadence] régua lote zero DESLIGADA (LOTE_ZERO_CADENCE_ENABLED!=true)");
 }
