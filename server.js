@@ -42,7 +42,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "lz-cadence-v4"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "lz-cadence-v5"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 async function callClaude(system, messages) {
   if (!API_KEY) throw new Error("ANTHROPIC_API_KEY ausente no ambiente");
@@ -184,10 +184,16 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, fs.readFileSync(path.join(__dirname, "public", "suporte.html"), "utf8"), "text/html; charset=utf-8");
     if (req.method === "GET" && url === "/api/gatilhos")
       return send(res, 200, Object.entries(GATILHOS).map(([k, v]) => ({ key: k, rotulo: v.rotulo, abertura: v.abertura })));
-    if (req.method === "GET" && url === "/api/metrics")
+    if (req.method === "GET" && url === "/api/metrics") {
+      const key = new URLSearchParams(req.url.split("?")[1] || "").get("key");
+      if (key !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
       return send(res, 200, store.metrics());
-    if (req.method === "GET" && url === "/api/leads")
+    }
+    if (req.method === "GET" && url === "/api/leads") { // PII (telefone + conversa) → exige chave
+      const key = new URLSearchParams(req.url.split("?")[1] || "").get("key");
+      if (key !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
       return send(res, 200, store.allLeads());
+    }
     if (req.method === "GET" && url === "/api/_lasthook") {
       const key = new URLSearchParams(req.url.split("?")[1] || "").get("key");
       if (key !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });

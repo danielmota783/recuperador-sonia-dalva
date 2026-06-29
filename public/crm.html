@@ -39,9 +39,13 @@ const STATES = [
   ["OBJECAO","Objeção"],["RECUPERADO","Recuperado ✅"],["ESCALADO","Escalar humano 🙋"],["PERDIDO","Perdido"]
 ];
 function brl(n){ return "R$ " + (n||0).toLocaleString("pt-BR",{minimumFractionDigits:2}); }
+const KEY = new URLSearchParams(location.search).get("key") || "";
 async function load(){
-  const m = await (await fetch("/api/metrics")).json();
-  const leads = await (await fetch("/api/leads")).json();
+  const qs = "?key=" + encodeURIComponent(KEY);
+  const mr = await fetch("/api/metrics" + qs);
+  if (mr.status === 403){ document.body.innerHTML = '<p style="font-family:sans-serif;padding:40px">🔒 Abra o painel com a chave: <code>/crm?key=SUA_CHAVE</code></p>'; return; }
+  const m = await mr.json();
+  const leads = await (await fetch("/api/leads" + qs)).json();
   document.getElementById("kpis").innerHTML = `
     <div class="kpi hero"><div class="v">${brl(m.faturamento_recuperado)}</div><div class="l">Faturamento recuperado</div></div>
     <div class="kpi"><div class="v">${m.recuperados}</div><div class="l">Vendas recuperadas</div></div>
