@@ -4,8 +4,10 @@
 (function () {
   if (window.__rosaWidget) return; window.__rosaWidget = true;
 
+  // Origem CRAVADA no Railway. NÃO derivar de document.currentScript.src: quando o arquivo
+  // é servido pelo WordPress (ex.: WP Rocket em /wp-content/cache/min/1/widget.js), a auto-detecção
+  // apontava o /api/chat pro próprio site → 406 → "Tive um probleminha aqui" (bug real da página, 01/07).
   var ORIGIN = "https://recuperador-sonia-dalva-production.up.railway.app";
-  try { var s = document.currentScript && document.currentScript.src; if (s) ORIGIN = s.replace(/\/widget\.js.*$/, ""); } catch (e) {}
   var API = ORIGIN + "/api/chat";
   var GATILHO = "suporte_pagina";
   var GREETING = "Oi! Aqui é a Rosa, do time da Sonia Dalva 🌹 Posso te ajudar com alguma dúvida sobre a imersão?";

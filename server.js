@@ -42,7 +42,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "cartao-webhook-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "recovery-endpoint-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function backoff(attempt) { return Math.min(8000, 600 * Math.pow(2, attempt)) + Math.floor(Math.random() * 400); }
@@ -135,6 +135,41 @@ function cleanName(raw) {
   if (s.length < 2 || s.length > 14) return "amiga";           // curto demais OU handle colado
   if (s.length > 11 && s === s.toLowerCase()) return "amiga";  // blob minúsculo colado
   return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase(); // Title-case
+}
+
+// identifica leads de teste (pra não sujar métrica de recuperação)
+function isTestLead(l) {
+  const p = String(l.phone || "");
+  return /^5500000000/.test(p) || p === "5599991202143" || p === "5599999999900" || /teste|probe|yascara/i.test(l.firstName || "");
+}
+// Métricas SÓ de recuperação de vendas (abandono pix/boleto/cartão). Exclui lote_zero e testes.
+// Atribui: recuperado COM toque da Rosa (mérito real) vs orgânico (pagou sozinho).
+function recoveryMetrics() {
+  const isRec = g => /^(ingresso|mentoria)_(pix|boleto|cartao)$/.test(g || "");
+  const leads = store.allLeads().filter(l => isRec(l.gatilho) && !isTestLead(l));
+  const lastRole = l => { const m = l.messages || []; return m.length ? m[m.length - 1].role : null; };
+  const ch = g => leads.filter(l => l.gatilho === g).length;
+  const rec = leads.filter(l => l.state === "RECUPERADO");
+  const comToque = rec.filter(l => l.firstTouchAt);
+  const organico = rec.filter(l => !l.firstTouchAt);
+  const sum = arr => arr.reduce((s, l) => s + (l.recoveredValue || 0), 0);
+  return {
+    updatedAt: new Date(Date.now()).toISOString(),
+    detectados: leads.length,
+    porCanal: { pix: ch("ingresso_pix"), boleto: ch("ingresso_boleto"), cartao: ch("ingresso_cartao"), mentoria: leads.filter(l => String(l.gatilho).startsWith("mentoria")).length },
+    abordados: leads.filter(l => l.firstTouchAt).length,
+    responderam: leads.filter(l => l.respondedAt).length,
+    emConversa: leads.filter(l => ["EM_CONVERSA", "OBJECAO"].includes(l.state)).length,
+    escalados: leads.filter(l => l.state === "ESCALADO").length,
+    perdidos: leads.filter(l => l.state === "PERDIDO").length,
+    optouts: leads.filter(l => l.optout).length,
+    ghost: leads.filter(l => lastRole(l) === "user" && !l.optout).length,
+    recuperados: {
+      total: rec.length, comToque: comToque.length, organico: organico.length,
+      valorTotal: sum(rec), valorComToque: sum(comToque), valorOrganico: sum(organico),
+    },
+    taxaResposta: leads.filter(l => l.firstTouchAt).length ? +(100 * leads.filter(l => l.respondedAt).length / leads.filter(l => l.firstTouchAt).length).toFixed(1) : 0,
+  };
 }
 
 // --- normaliza payload da Hotmart (shape CONFIRMADO no teste real 19/06; Webhook 2.0) ---
@@ -233,6 +268,11 @@ const server = http.createServer(async (req, res) => {
       const key = new URLSearchParams(req.url.split("?")[1] || "").get("key");
       if (key !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
       return send(res, 200, store.allLeads());
+    }
+    if (req.method === "GET" && url === "/api/recovery") { // métricas de recuperação p/ o painel no Infinitum Launch
+      const key = new URLSearchParams(req.url.split("?")[1] || "").get("key");
+      if (key !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
+      return send(res, 200, recoveryMetrics());
     }
     if (req.method === "GET" && url === "/api/_lasthook") {
       const key = new URLSearchParams(req.url.split("?")[1] || "").get("key");

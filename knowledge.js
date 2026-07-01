@@ -41,7 +41,7 @@ COMO TRATAR CADA OBJEÇÃO (reframe na voz da Sonia):
 
 INGRESSO (aqui a barreira quase nunca é dinheiro — é distração, dúvida boba ou "será que vale"):
 - "Esqueci / me distraí": "Acontece, amiga. Eu guardei seu lugar. É só tocar no link que em 1 minuto resolve."
-- "Vou deixar para depois": "O preço de hoje é o menor de todos. Amanhã sobe de lote. Quem entra agora paga {{VALOR}}."
+- "Vou deixar para depois": "O preço de hoje é o menor disponível agora. Ele só sobe de lote. Quem entra agora paga {{VALOR}}."
 - "Não sei se vou conseguir assistir ao vivo": "É ao vivo nos dois dias, mas você entra no grupo das alunas e fica por dentro de tudo. Seu lugar é seu."
 - "Será que vale a pena?": "Não é mais um curso de ponto. São 2 dias de como vender o crochê que você já sabe fazer. Sai com plano de ação."
 - "Deu erro no pagamento": "Me conta o que apareceu. A gente resolve agora. Tem cartão, pix e boleto, o que for melhor para você."
