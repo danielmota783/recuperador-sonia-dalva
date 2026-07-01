@@ -42,7 +42,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "cartao-boleto-live"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "cartao-webhook-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function backoff(attempt) { return Math.min(8000, 600 * Math.pow(2, attempt)) + Math.floor(Math.random() * 400); }
@@ -150,14 +150,20 @@ function parseHotmart(p) {
   const firstName = (buyer.first_name || buyer.name || p.firstName || p.name || "amiga").split(" ")[0];
   const value = (purchase.price && purchase.price.value) || p.value || 0;
   const sck = (purchase.tracking && purchase.tracking.source_sck) || purchase.sckPaymentLink || p.sck || null;
+  // tipo de pagamento (pra distinguir cartão recusado de cancelamento de pix/boleto)
+  const payType = String((purchase.payment && purchase.payment.type) || (data.payment && data.payment.type) || p.payment_type || "").toUpperCase();
+  const isCard = /CARD|CREDIT|CARTAO/.test(payType);
 
   let gatilho = null, kind = null;
   if (/APPROVED|COMPLETE/.test(status)) kind = "venda";
   else if (/OUT_OF_SHOPPING_CART|ABANDON/.test(status)) { kind = "detect"; gatilho = `${productType}_abandono`; }
   else if (/PIX/.test(status) || p.event === "pix") { kind = "detect"; gatilho = productType === "mentoria" ? "mentoria_pix" : "ingresso_pix"; }
   else if (/BILLET|BOLETO/.test(status) || p.event === "boleto") { kind = "detect"; gatilho = productType === "mentoria" ? "mentoria_boleto" : "ingresso_boleto"; }
-  else if (/CANCEL|REFUSED|CARTAO/.test(status) || p.event === "cartao") { kind = "detect"; gatilho = "ingresso_cartao"; }
-  return { kind, phone, firstName, product: productType, gatilho, value, sck, status };
+  else if (/CANCEL|REFUSED|CARTAO/.test(status) || p.event === "cartao") {
+    // só vira "cartão recusado" se o pagamento foi por CARTÃO; cancelamento de pix/boleto NÃO recebe a msg de cartão
+    if (isCard || p.event === "cartao") { kind = "detect"; gatilho = "ingresso_cartao"; }
+  }
+  return { kind, phone, firstName, product: productType, gatilho, value, sck, status, payType };
 }
 
 // --- 1º TOQUE via ManyChat (template aprovado) ---
