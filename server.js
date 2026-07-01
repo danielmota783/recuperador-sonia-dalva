@@ -42,7 +42,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "retry-backoff-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "cartao-firing-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function backoff(attempt) { return Math.min(8000, 600 * Math.pow(2, attempt)) + Math.floor(Math.random() * 400); }
@@ -162,7 +162,11 @@ function parseHotmart(p) {
 
 // --- 1º TOQUE via ManyChat (template aprovado) ---
 const FLOW_NS_PIX = ENV.FLOW_NS_PIX || "content20260622165339_068522"; // fluxo "Recuperação Pix - IREC 02"
+const FLOW_NS_BOLETO = ENV.FLOW_NS_BOLETO || null; // fluxo do template irec_ingresso_boleto_pendente (criar no ManyChat p/ ligar)
+const FLOW_NS_CARTAO = ENV.FLOW_NS_CARTAO || null; // fluxo do template irec_ingresso_cartao_recusado (criar no ManyChat p/ ligar)
 const FIRST_TOUCH = ENV.FIRST_TOUCH_ENABLED === "true"; // trava: só dispara automático quando ligado
+// mapa gatilho → flow do 1º toque. Só dispara se o flow existir; cartão/boleto ficam null até o flow ser montado no ManyChat.
+const FLOW_NS_BY_GATILHO = { ingresso_pix: FLOW_NS_PIX, ingresso_boleto: FLOW_NS_BOLETO, ingresso_cartao: FLOW_NS_CARTAO };
 
 // --- VIGIA DE PIX/BOLETO PENDENTE (recuperação ativa via API Hotmart) ---
 const POLL_PRODUCTS = [7860446]; // ingresso IREC (mentoria 7016784 entra na Fase 3)
@@ -183,10 +187,11 @@ async function runRecoveryPoll() {
         const gatilho = `${ptype}_${method}`;
         store.upsertLead({ phone, firstName: rec.firstName, product: ptype, gatilho, value: rec.value, offer: rec.offer, sck: "recuperacao" }, now);
         novos.push({ phone, nome: rec.firstName, gatilho, transacao: rec.transaction });
-        // 1º toque automático (só pix por enquanto, e só se a trava estiver ligada)
-        if (FIRST_TOUCH && gatilho === "ingresso_pix") {
+        // 1º toque automático: dispara o flow do gatilho (pix já tem; boleto/cartão quando o flow existir). Gated pela trava.
+        const flowNs = FLOW_NS_BY_GATILHO[gatilho];
+        if (FIRST_TOUCH && flowNs) {
           try {
-            await manychat.firstTouch({ phone, firstName: rec.firstName, flowNs: FLOW_NS_PIX });
+            await manychat.firstTouch({ phone, firstName: rec.firstName, flowNs });
             store.setState(phone, "ABORDADO", now, { firstTouch: true });
           } catch (e) { erros.push(`firstTouch ${phone}: ${e.message}`); }
         }
@@ -248,6 +253,9 @@ const server = http.createServer(async (req, res) => {
         hotmartSet: !!(ENV.HOTMART_CLIENT_ID && ENV.HOTMART_CLIENT_SECRET),
         firstTouchEnabled: ENV.FIRST_TOUCH_ENABLED === "true",   // 1º toque automático
         flowNsPixSet: !!FLOW_NS_PIX,
+        flowNsBoletoSet: !!FLOW_NS_BOLETO,
+        flowNsCartaoSet: !!FLOW_NS_CARTAO,
+        webhookHotmartRecebido: !!lastHotmart, // Hotmart já postou no /webhook/hotmart? (detecção de cartão depende disso)
         followupEnabled: ENV.FOLLOWUP_ENABLED === "true",
         digestEnabled: ENV.DIGEST_ENABLED === "true",
         sendflowKeySet: !!(process.env.SENDFLOW_API_KEY || ENV.SENDFLOW_API_KEY),
@@ -352,8 +360,14 @@ const server = http.createServer(async (req, res) => {
       }
       if (e.kind === "detect" && e.phone) {
         store.upsertLead({ phone: e.phone, firstName: e.firstName, product: e.product, gatilho: e.gatilho, value: e.value, sck: e.sck }, now);
-        // TODO: aqui dispara o 1º toque via ManyChat (sendFlow do template) quando o fluxo estiver montado.
-        return send(res, 200, { ok: true, action: "detectado", gatilho: e.gatilho });
+        // 1º toque via ManyChat: dispara o flow do gatilho (pix/boleto/cartão), se o flow existir e a trava estiver ligada.
+        const flowNs = FLOW_NS_BY_GATILHO[e.gatilho];
+        let ft = null;
+        if (FIRST_TOUCH && flowNs) {
+          try { await manychat.firstTouch({ phone: e.phone, firstName: e.firstName, flowNs }); store.setState(e.phone, "ABORDADO", now, { firstTouch: true }); ft = "enviado"; }
+          catch (err) { ft = "erro: " + err.message; }
+        }
+        return send(res, 200, { ok: true, action: "detectado", gatilho: e.gatilho, firstTouch: ft });
       }
       return send(res, 200, { ok: true, action: "ignorado", status: e.status });
     }
