@@ -42,7 +42,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "cartao-firing-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "cartao-boleto-live"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function backoff(attempt) { return Math.min(8000, 600 * Math.pow(2, attempt)) + Math.floor(Math.random() * 400); }
@@ -162,8 +162,8 @@ function parseHotmart(p) {
 
 // --- 1º TOQUE via ManyChat (template aprovado) ---
 const FLOW_NS_PIX = ENV.FLOW_NS_PIX || "content20260622165339_068522"; // fluxo "Recuperação Pix - IREC 02"
-const FLOW_NS_BOLETO = ENV.FLOW_NS_BOLETO || null; // fluxo do template irec_ingresso_boleto_pendente (criar no ManyChat p/ ligar)
-const FLOW_NS_CARTAO = ENV.FLOW_NS_CARTAO || null; // fluxo do template irec_ingresso_cartao_recusado (criar no ManyChat p/ ligar)
+const FLOW_NS_BOLETO = ENV.FLOW_NS_BOLETO || "content20260701002836_228108"; // fluxo "Recuperação Boleto - IREC 02"
+const FLOW_NS_CARTAO = ENV.FLOW_NS_CARTAO || "content20260701003009_307573"; // fluxo "Recuperação Cartão Recusado - IREC 02"
 const FIRST_TOUCH = ENV.FIRST_TOUCH_ENABLED === "true"; // trava: só dispara automático quando ligado
 // mapa gatilho → flow do 1º toque. Só dispara se o flow existir; cartão/boleto ficam null até o flow ser montado no ManyChat.
 const FLOW_NS_BY_GATILHO = { ingresso_pix: FLOW_NS_PIX, ingresso_boleto: FLOW_NS_BOLETO, ingresso_cartao: FLOW_NS_CARTAO };
