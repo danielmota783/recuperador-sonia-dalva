@@ -42,18 +42,47 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "lz-cadence-v5"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "retry-backoff-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
 
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function backoff(attempt) { return Math.min(8000, 600 * Math.pow(2, attempt)) + Math.floor(Math.random() * 400); }
+
+// Chama o Claude com RETRY/BACKOFF: 429 (rate limit), 529 (overloaded), 5xx e erro de rede
+// são transitórios → espera e tenta de novo (respeita Retry-After). Sem isso, um único engasgo
+// do Claude derrubava a resposta da Rosa e o lead ficava órfão (bug do disparo de 30/06).
 async function callClaude(system, messages) {
   if (!API_KEY) throw new Error("ANTHROPIC_API_KEY ausente no ambiente");
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "x-api-key": API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-    body: JSON.stringify({ model: MODEL, max_tokens: 600, system, messages }),
-  });
-  if (!res.ok) throw new Error(`Anthropic ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  const data = await res.json();
-  return (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n").trim();
+  const MAX = 4;
+  let lastErr = null;
+  for (let attempt = 0; attempt <= MAX; attempt++) {
+    let res;
+    try {
+      res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+        body: JSON.stringify({ model: MODEL, max_tokens: 600, system, messages }),
+      });
+    } catch (e) { // erro de rede/conexão
+      lastErr = e;
+      if (attempt < MAX) { console.warn(`[claude] rede ${e.message} — retry ${attempt + 1}/${MAX}`); await sleep(backoff(attempt)); continue; }
+      throw e;
+    }
+    if (res.ok) {
+      const data = await res.json();
+      return (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n").trim();
+    }
+    const body = (await res.text().catch(() => "")).slice(0, 300);
+    const retryable = res.status === 429 || res.status === 529 || res.status >= 500;
+    if (retryable && attempt < MAX) {
+      const ra = Number(res.headers.get("retry-after"));
+      const wait = ra > 0 ? ra * 1000 : backoff(attempt);
+      console.warn(`[claude] ${res.status} — retry ${attempt + 1}/${MAX} em ${wait}ms`);
+      await sleep(wait);
+      continue;
+    }
+    throw new Error(`Anthropic ${res.status}: ${body}`);
+  }
+  throw lastErr || new Error("Anthropic: falha após retries");
 }
 
 function send(res, code, body, type = "application/json") {
