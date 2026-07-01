@@ -42,7 +42,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "recovery-fix-source-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "recovery-purge-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function backoff(attempt) { return Math.min(8000, 600 * Math.pow(2, attempt)) + Math.floor(Math.random() * 400); }
@@ -275,6 +275,14 @@ const server = http.createServer(async (req, res) => {
       const key = new URLSearchParams(req.url.split("?")[1] || "").get("key");
       if (key !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
       return send(res, 200, recoveryMetrics());
+    }
+    if (req.method === "GET" && url === "/api/_purge_bad_recovery") { // apaga leads pix/boleto criados por engano pelo webhook (sck != recuperacao). dry-run por padrão; confirm=true executa.
+      const q = new URLSearchParams(req.url.split("?")[1] || "");
+      if (q.get("key") !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
+      const bad = store.allLeads().filter(l => /_(pix|boleto)$/.test(l.gatilho || "") && l.sck !== "recuperacao" && !isTestLead(l));
+      if (q.get("confirm") !== "true") return send(res, 200, { dryRun: true, wouldDelete: bad.length, amostra: bad.slice(0, 5).map(l => ({ nome: l.firstName, phone: l.phone, gatilho: l.gatilho, state: l.state })) });
+      let n = 0; for (const l of bad) { if (store.deleteLead(l.phone)) n++; }
+      return send(res, 200, { ok: true, deleted: n });
     }
     if (req.method === "GET" && url === "/api/_lasthook") {
       const key = new URLSearchParams(req.url.split("?")[1] || "").get("key");
