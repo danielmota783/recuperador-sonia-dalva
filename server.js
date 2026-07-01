@@ -42,7 +42,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "recovery-endpoint-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "recovery-fix-source-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function backoff(attempt) { return Math.min(8000, 600 * Math.pow(2, attempt)) + Math.floor(Math.random() * 400); }
@@ -146,7 +146,9 @@ function isTestLead(l) {
 // Atribui: recuperado COM toque da Rosa (mérito real) vs orgânico (pagou sozinho).
 function recoveryMetrics() {
   const isRec = g => /^(ingresso|mentoria)_(pix|boleto|cartao)$/.test(g || "");
-  const leads = store.allLeads().filter(l => isRec(l.gatilho) && !isTestLead(l));
+  // recuperação genuína: pix/boleto SÓ da vigia (sck="recuperacao"); cartão do webhook.
+  // exclui leads pix/boleto que o webhook criou por engano (geração de pagamento ≠ abandono).
+  const leads = store.allLeads().filter(l => isRec(l.gatilho) && !isTestLead(l) && (l.sck === "recuperacao" || l.gatilho === "ingresso_cartao"));
   const lastRole = l => { const m = l.messages || []; return m.length ? m[m.length - 1].role : null; };
   const ch = g => leads.filter(l => l.gatilho === g).length;
   const rec = leads.filter(l => l.state === "RECUPERADO");
@@ -405,8 +407,15 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, { ok: true, action: "venda_sem_lead" });
       }
       if (e.kind === "detect" && e.phone) {
+        // Recuperação de pix/boleto é detectada SÓ pela vigia (poll WAITING_PAYMENT): ela espera e só
+        // pega o que CONTINUA pendente (abandono real, não pix que paga na hora) e classifica pelo tipo
+        // REAL do pagamento. O webhook dispara na GERAÇÃO do pagamento e não sabe o tipo de forma
+        // confiável (classificava pix como boleto) → NÃO cria lead pix/boleto aqui. Só cartão e abandono.
+        if (/_(pix|boleto)$/.test(e.gatilho)) {
+          return send(res, 200, { ok: true, action: "ignorado_pix_boleto_webhook", gatilho: e.gatilho });
+        }
         store.upsertLead({ phone: e.phone, firstName: e.firstName, product: e.product, gatilho: e.gatilho, value: e.value, sck: e.sck }, now);
-        // 1º toque via ManyChat: dispara o flow do gatilho (pix/boleto/cartão), se o flow existir e a trava estiver ligada.
+        // 1º toque via ManyChat: dispara o flow do gatilho (cartão), se o flow existir e a trava estiver ligada.
         const flowNs = FLOW_NS_BY_GATILHO[e.gatilho];
         let ft = null;
         if (FIRST_TOUCH && flowNs) {
