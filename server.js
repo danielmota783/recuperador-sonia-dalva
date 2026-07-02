@@ -42,7 +42,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "recovery-purge-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "rescue-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function backoff(attempt) { return Math.min(8000, 600 * Math.pow(2, attempt)) + Math.floor(Math.random() * 400); }
@@ -283,6 +283,51 @@ const server = http.createServer(async (req, res) => {
       if (q.get("confirm") !== "true") return send(res, 200, { dryRun: true, wouldDelete: bad.length, amostra: bad.slice(0, 5).map(l => ({ nome: l.firstName, phone: l.phone, gatilho: l.gatilho, state: l.state })) });
       let n = 0; for (const l of bad) { if (store.deleteLead(l.phone)) n++; }
       return send(res, 200, { ok: true, deleted: n });
+    }
+    if (req.method === "GET" && url === "/api/_rescue") { // ressuscita leads ghostados na janela 24h: quem já comprou → fecha; quem não → Rosa reativa
+      const q = new URLSearchParams(req.url.split("?")[1] || "");
+      if (q.get("key") !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
+      const now = Date.now(), DIA = 24 * 3600 * 1000, CAP = 80;
+      const confirm = q.get("confirm") === "true";
+      const lastRole = l => { const m = l.messages || []; return m.length ? m[m.length - 1].role : null; };
+      const lastUserTs = l => { const m = l.messages || []; for (let i = m.length - 1; i >= 0; i--) if (m[i].role === "user") return Date.parse(m[i].ts); return 0; };
+      // alvo: última msg é do lead (Rosa deve resposta), dentro da janela 24h, não teste, não optout
+      const alvo = store.allLeads().filter(l => lastRole(l) === "user" && !l.optout && !isTestLead(l) && (now - lastUserTs(l) <= DIA));
+      // quem já comprou o ingresso (Hotmart aprovado, últimas 72h) — casa pelos últimos 8 dígitos do telefone
+      const bought = new Set();
+      let hotmartOk = false;
+      try {
+        const tok = await hotmart.token();
+        const params = new URLSearchParams({ transaction_status: "APPROVED", product_id: "7860446", start_date: String(now - 72 * 3600 * 1000), end_date: String(now), max_results: "500" }).toString();
+        const r = await fetch("https://developers.hotmart.com/payments/api/v1/sales/users?" + params, { headers: { Authorization: "Bearer " + tok } });
+        const d = await r.json();
+        for (const it of (d.items || [])) {
+          const b = (it.users || []).find(u => u.role === "BUYER");
+          const ph = String((b && b.user && (b.user.cellphone || b.user.phone)) || "").replace(/\D/g, "");
+          if (ph.length >= 8) bought.add(ph.slice(-8));
+        }
+        hotmartOk = true;
+      } catch (e) { console.warn("[rescue] hotmart falhou:", e.message); }
+      const jaCompraram = alvo.filter(l => bought.has(String(l.phone).replace(/\D/g, "").slice(-8)));
+      const reativar = alvo.filter(l => !bought.has(String(l.phone).replace(/\D/g, "").slice(-8)));
+      if (!confirm) return send(res, 200, { dryRun: true, hotmartOk, total: alvo.length, jaCompraram: jaCompraram.length, reativar: reativar.length, amostra: reativar.slice(0, 6).map(l => ({ nome: l.firstName, gatilho: l.gatilho })) });
+      let fechados = 0, enviados = 0; const erros = [];
+      for (const l of jaCompraram) { store.markRecovered(l.phone, l.value || 9.9, now); fechados++; }
+      let c = 0;
+      for (const l of reativar) {
+        if (c++ >= CAP) break;
+        try {
+          const lead = store.getLead(l.phone);
+          const history = (lead.messages || []).map(m => ({ role: m.role, content: m.content }));
+          const reply = await callClaude(systemPrompt(lead.gatilho, lead), history);
+          await manychat.sendTextToPhone(lead.phone, reply, lead.firstName);
+          store.appendMessage(lead.phone, "assistant", reply, Date.now());
+          store.setState(lead.phone, escalated(reply) ? "ESCALADO" : "EM_CONVERSA", Date.now());
+          enviados++;
+          await sleep(300);
+        } catch (e) { erros.push(l.phone + ": " + e.message); }
+      }
+      return send(res, 200, { ok: true, fechados, enviados, erros });
     }
     if (req.method === "GET" && url === "/api/_lasthook") {
       const key = new URLSearchParams(req.url.split("?")[1] || "").get("key");
