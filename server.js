@@ -31,6 +31,7 @@ if (!API_KEY) console.warn("[aviso] ANTHROPIC_API_KEY ausente — o servidor sob
 
 // Rede de seguranca: nada derruba o processo. Captura o ultimo erro pra diagnostico remoto.
 let lastError = null;
+let lastUsage = null; // última usage do Claude (pra confirmar que o cache do prompt pegou)
 function recordErr(type, e) {
   lastError = { when: new Date(Date.now()).toISOString(), type, msg: String((e && e.message) || e), stack: String((e && e.stack) || "").slice(0, 1000) };
   console.error(`[${type}]`, e);
@@ -42,7 +43,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "rescue-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "prompt-cache-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function backoff(attempt) { return Math.min(8000, 600 * Math.pow(2, attempt)) + Math.floor(Math.random() * 400); }
@@ -60,7 +61,14 @@ async function callClaude(system, messages) {
       res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "x-api-key": API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-        body: JSON.stringify({ model: MODEL, max_tokens: 600, system, messages }),
+        // CACHE DE PROMPT: o system (cérebro ~4.4k tokens) é sempre igual → guarda processado 5min.
+        // Chamadas seguintes leem por 1/10 do preço. NÃO muda nada no que a Rosa recebe/responde.
+        body: JSON.stringify({
+          model: MODEL,
+          max_tokens: 600,
+          system: typeof system === "string" ? [{ type: "text", text: system, cache_control: { type: "ephemeral" } }] : system,
+          messages,
+        }),
       });
     } catch (e) { // erro de rede/conexão
       lastErr = e;
@@ -69,6 +77,7 @@ async function callClaude(system, messages) {
     }
     if (res.ok) {
       const data = await res.json();
+      lastUsage = data.usage || null;
       return (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n").trim();
     }
     const body = (await res.text().catch(() => "")).slice(0, 300);
@@ -357,6 +366,7 @@ const server = http.createServer(async (req, res) => {
         flowNsBoletoSet: !!FLOW_NS_BOLETO,
         flowNsCartaoSet: !!FLOW_NS_CARTAO,
         webhookHotmartRecebido: !!lastHotmart, // Hotmart já postou no /webhook/hotmart? (detecção de cartão depende disso)
+        cacheUsage: lastUsage ? { input: lastUsage.input_tokens, cacheWrite: lastUsage.cache_creation_input_tokens, cacheRead: lastUsage.cache_read_input_tokens, output: lastUsage.output_tokens } : null,
         followupEnabled: ENV.FOLLOWUP_ENABLED === "true",
         digestEnabled: ENV.DIGEST_ENABLED === "true",
         sendflowKeySet: !!(process.env.SENDFLOW_API_KEY || ENV.SENDFLOW_API_KEY),
