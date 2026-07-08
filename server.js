@@ -43,7 +43,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "prompt-cache-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "retry-touch-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function backoff(attempt) { return Math.min(8000, 600 * Math.pow(2, attempt)) + Math.floor(Math.random() * 400); }
@@ -127,12 +127,17 @@ function chatRateLimited(ip) {
 
 // garante E.164 do Brasil (prefixo 55) pro WhatsApp
 function toE164BR(p) {
-  const d = String(p || "").replace(/\D/g, "");
+  let d = String(p || "").replace(/\D/g, "");
   if (!d) return "";
-  if (d.startsWith("55") && d.length >= 12) return d;
-  if (d.length === 10 || d.length === 11) return "55" + d;
+  // já vem certo: 55 + DDD(2) + 8/9 dígitos (12 ou 13 no total)
+  if (d.startsWith("55") && (d.length === 12 || d.length === 13)) return d;
+  d = d.replace(/^0+/, ""); // tira 0 de operadora/DDD na frente (ex.: 032..., 065..., 098...)
+  if (d.length === 10 || d.length === 11) return "55" + d; // nacional: DDD + número → prefixa país
+  if (d.startsWith("55") && d.length >= 12) return d;       // já tem país, tamanho atípico → devolve p/ validação externa
   return d;
 }
+// erro do ManyChat quando o número não é um WhatsApp válido (checkout digitado errado)
+function isInvalidWhatsapp(msg) { return /not a valid WhatsApp ID|invalid.*wa_id|Validation error/i.test(msg || ""); }
 
 // Sanitiza o 1º nome p/ mensagem (muitos vêm como email, @handle colado ou com emoji).
 // Tudo que não for nome de gente confiável vira "amiga" — melhor que "Oi, fulano@gmail.com!".
@@ -174,6 +179,7 @@ function recoveryMetrics() {
     escalados: leads.filter(l => l.state === "ESCALADO").length,
     perdidos: leads.filter(l => l.state === "PERDIDO").length,
     optouts: leads.filter(l => l.optout).length,
+    invalidos: leads.filter(l => l.state === "INVALIDO").length, // número inválido no checkout (WhatsApp não alcança)
     ghost: leads.filter(l => lastRole(l) === "user" && !l.optout).length,
     recuperados: {
       total: rec.length, comToque: comToque.length, organico: organico.length,
@@ -251,7 +257,41 @@ async function runRecoveryPoll() {
     }
   }
   if (novos.length) console.log("[poll] novos pendentes:", JSON.stringify(novos));
-  return { novos, erros };
+  // auto-cura: retenta o 1º toque de quem ficou preso em DETECTADO (falha transitória ou número a normalizar)
+  let retried = [];
+  try { retried = await retryStuckTouches(now, 12); } catch (e) { console.warn("[retry-touch]", e.message); }
+  return { novos, erros, retried };
+}
+
+// Retenta o 1º toque de leads presos em DETECTADO sem firstTouch. Renormaliza o número
+// (migrando a chave se corrigir) e marca INVALIDO quando o ManyChat rejeita o WhatsApp.
+async function retryStuckTouches(now, cap = 12) {
+  if (!FIRST_TOUCH) return [];
+  const stuck = store.allLeads().filter(l =>
+    l.state === "DETECTADO" && !l.firstTouchAt && !l.optout &&
+    (l.sck === "recuperacao" || l.gatilho === "ingresso_cartao") && !isTestLead(l));
+  const done = [];
+  let n = 0;
+  for (const l of stuck) {
+    if (n >= cap) break;
+    const flowNs = FLOW_NS_BY_GATILHO[l.gatilho];
+    if (!flowNs) continue;
+    let phone = toE164BR(l.phone);
+    if (phone && phone !== l.phone && store.remapPhone(l.phone, phone)) { /* migrado */ }
+    else { phone = l.phone; }
+    n++;
+    try {
+      await manychat.firstTouch({ phone, firstName: l.firstName, flowNs });
+      store.setState(phone, "ABORDADO", now, { firstTouch: true });
+      done.push({ phone, nome: l.firstName, ok: true });
+    } catch (e) {
+      if (isInvalidWhatsapp(e.message)) { store.setState(phone, "INVALIDO", now); done.push({ phone, nome: l.firstName, invalido: true }); }
+      else { done.push({ phone, nome: l.firstName, erro: e.message }); recordErr("retryTouch", e); }
+    }
+    await sleep(300);
+  }
+  if (done.length) console.log("[retry-touch]", JSON.stringify(done));
+  return done;
 }
 
 const server = http.createServer(async (req, res) => {
@@ -337,6 +377,14 @@ const server = http.createServer(async (req, res) => {
         } catch (e) { erros.push(l.phone + ": " + e.message); }
       }
       return send(res, 200, { ok: true, fechados, enviados, erros });
+    }
+    if (req.method === "GET" && url === "/api/_retry_touches") { // resgata leads presos em DETECTADO sem 1º toque. dry-run por padrão; confirm=true executa.
+      const q = new URLSearchParams(req.url.split("?")[1] || "");
+      if (q.get("key") !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
+      const stuck = store.allLeads().filter(l => l.state === "DETECTADO" && !l.firstTouchAt && !l.optout && (l.sck === "recuperacao" || l.gatilho === "ingresso_cartao") && !isTestLead(l));
+      if (q.get("confirm") !== "true") return send(res, 200, { dryRun: true, travados: stuck.length, amostra: stuck.slice(0, 20).map(l => ({ nome: l.firstName, phone: l.phone, normalizado: toE164BR(l.phone), gatilho: l.gatilho })) });
+      const done = await retryStuckTouches(Date.now(), Number(q.get("cap")) || 30);
+      return send(res, 200, { ok: true, tentados: done.length, tocados: done.filter(d => d.ok).length, invalidos: done.filter(d => d.invalido).length, erros: done.filter(d => d.erro), detalhe: done });
     }
     if (req.method === "GET" && url === "/api/_lasthook") {
       const key = new URLSearchParams(req.url.split("?")[1] || "").get("key");

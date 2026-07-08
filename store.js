@@ -131,6 +131,21 @@ function markRecovered(phone, value, ts) {
   return lead;
 }
 
+// Migra um lead de um telefone (chave) pra outro — usado quando a normalização
+// corrige o número (ex.: 032... → 5532...). Preserva histórico e não sobrescreve destino já existente.
+function remapPhone(oldPhone, newPhone) {
+  const db = load();
+  const from = normPhone(oldPhone), to = normPhone(newPhone);
+  if (!from || !to || from === to) return false;
+  const lead = db.leads[from];
+  if (!lead || db.leads[to]) return false; // não existe origem, ou destino já ocupado
+  lead.phone = to;
+  db.leads[to] = lead;
+  delete db.leads[from];
+  persist(db);
+  return true;
+}
+
 function allLeads() { return Object.values(load().leads); }
 
 function metrics() {
@@ -155,4 +170,4 @@ function metrics() {
   return m;
 }
 
-module.exports = { upsertLead, getLead, deleteLead, appendMessage, setState, markRecovered, recordFollowup, recordCadence, allLeads, metrics, normPhone };
+module.exports = { upsertLead, getLead, deleteLead, appendMessage, setState, markRecovered, recordFollowup, recordCadence, remapPhone, allLeads, metrics, normPhone };
