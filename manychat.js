@@ -78,15 +78,25 @@ async function resolveId(phone, firstName) {
   const digits = String(phone).replace(/\D/g, "");
   const plus = "+" + digits;
   let id = null;
-  // 1) acha aluna existente pelo campo Whatsapp_ID (formato +55...) — caso mais comum
-  try { id = pickId(await findByCustomField(WHATSAPP_ID_FIELD, plus)); } catch (e) { /* segue */ }
-  // 2) fallback: por phone (contatos que nós criamos têm phone setado)
+  // 1) campo Whatsapp_ID em DÍGITOS CRUS — formato REAL da conta da Sonia p/ contatos de WhatsApp (ex.: 5569981215692)
+  try { id = pickId(await findByCustomField(WHATSAPP_ID_FIELD, digits)); } catch (e) { /* segue */ }
+  // 2) mesmo campo com + (contatos que nós gravamos assim)
+  if (!id) { try { id = pickId(await findByCustomField(WHATSAPP_ID_FIELD, plus)); } catch (e) { /* segue */ } }
+  // 3) system field phone (ambos os formatos)
   if (!id) { try { id = pickId(await findByPhone(plus)); } catch (e) { /* segue */ } }
-  // 3) cria novo e grava o Whatsapp_ID pra ser achável depois
+  if (!id) { try { id = pickId(await findByPhone(digits)); } catch (e) { /* segue */ } }
+  // 4) cria novo; se o WhatsApp já existir (contato não achável pelos lookups), acha pelos dígitos crus
   if (!id) {
-    const created = await createSubscriber({ phone: plus, firstName });
-    id = pickId(created);
-    if (id) { try { await setCustomField(id, WHATSAPP_ID_FIELD, plus); } catch (e) { /* nao bloqueia */ } }
+    try {
+      const created = await createSubscriber({ phone: plus, firstName });
+      id = pickId(created);
+      if (id) { try { await setCustomField(id, WHATSAPP_ID_FIELD, digits); } catch (e) { /* nao bloqueia */ } }
+    } catch (e) {
+      if (/already exists/i.test(e.message)) {
+        try { id = pickId(await findByCustomField(WHATSAPP_ID_FIELD, digits)); } catch (e2) { /* segue */ }
+      }
+      if (!id) throw e; // erro real (ex.: "not a valid WhatsApp ID") sobe pra ser tratado
+    }
   }
   if (!id) throw new Error("ManyChat: nao obteve subscriber id para " + digits);
   return id;

@@ -43,7 +43,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "retry-touch-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "retry-touch-v2"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function backoff(attempt) { return Math.min(8000, 600 * Math.pow(2, attempt)) + Math.floor(Math.random() * 400); }
@@ -136,8 +136,9 @@ function toE164BR(p) {
   if (d.startsWith("55") && d.length >= 12) return d;       // já tem país, tamanho atípico → devolve p/ validação externa
   return d;
 }
-// erro do ManyChat quando o número não é um WhatsApp válido (checkout digitado errado)
-function isInvalidWhatsapp(msg) { return /not a valid WhatsApp ID|invalid.*wa_id|Validation error/i.test(msg || ""); }
+// erro do ManyChat quando o número é MORTO de verdade (não é WhatsApp). "already exists" NÃO conta:
+// esse contato é alcançável, só não foi achado pelos lookups — não marcar como inválido.
+function isInvalidWhatsapp(msg) { return /not a valid WhatsApp ID/i.test(msg || ""); }
 
 // Sanitiza o 1º nome p/ mensagem (muitos vêm como email, @handle colado ou com emoji).
 // Tudo que não for nome de gente confiável vira "amiga" — melhor que "Oi, fulano@gmail.com!".
@@ -378,9 +379,12 @@ const server = http.createServer(async (req, res) => {
       }
       return send(res, 200, { ok: true, fechados, enviados, erros });
     }
-    if (req.method === "GET" && url === "/api/_retry_touches") { // resgata leads presos em DETECTADO sem 1º toque. dry-run por padrão; confirm=true executa.
+    if (req.method === "GET" && url === "/api/_retry_touches") { // resgata leads presos em DETECTADO sem 1º toque. dry-run por padrão; confirm=true executa. reset=true reabre os INVALIDO.
       const q = new URLSearchParams(req.url.split("?")[1] || "");
       if (q.get("key") !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
+      if (q.get("reset") === "true") { // reabre leads marcados INVALIDO por engano (voltam pra fila de toque)
+        for (const l of store.allLeads().filter(l => l.state === "INVALIDO" && (l.sck === "recuperacao" || l.gatilho === "ingresso_cartao"))) store.setState(l.phone, "DETECTADO", Date.now());
+      }
       const stuck = store.allLeads().filter(l => l.state === "DETECTADO" && !l.firstTouchAt && !l.optout && (l.sck === "recuperacao" || l.gatilho === "ingresso_cartao") && !isTestLead(l));
       if (q.get("confirm") !== "true") return send(res, 200, { dryRun: true, travados: stuck.length, amostra: stuck.slice(0, 20).map(l => ({ nome: l.firstName, phone: l.phone, normalizado: toE164BR(l.phone), gatilho: l.gatilho })) });
       const done = await retryStuckTouches(Date.now(), Number(q.get("cap")) || 30);
