@@ -43,7 +43,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "retry-touch-v2"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "escalados-triage-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function backoff(attempt) { return Math.min(8000, 600 * Math.pow(2, attempt)) + Math.floor(Math.random() * 400); }
@@ -378,6 +378,32 @@ const server = http.createServer(async (req, res) => {
         } catch (e) { erros.push(l.phone + ": " + e.message); }
       }
       return send(res, 200, { ok: true, fechados, enviados, erros });
+    }
+    if (req.method === "GET" && url === "/api/_triage_escalados") { // fecha escalados que JÁ compraram (Hotmart) e devolve os que precisam mesmo de humano. dry-run; confirm=true executa.
+      const q = new URLSearchParams(req.url.split("?")[1] || "");
+      if (q.get("key") !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
+      const now = Date.now(), confirm = q.get("confirm") === "true";
+      const esc = store.allLeads().filter(l => l.state === "ESCALADO" && !isTestLead(l));
+      const bought = new Set(); let hotmartOk = false;
+      try {
+        const tok = await hotmart.token();
+        const params = new URLSearchParams({ transaction_status: "APPROVED", product_id: "7860446", start_date: String(now - 14 * 24 * 3600 * 1000), end_date: String(now), max_results: "500" }).toString();
+        const r = await fetch("https://developers.hotmart.com/payments/api/v1/sales/users?" + params, { headers: { Authorization: "Bearer " + tok } });
+        const d = await r.json();
+        for (const it of (d.items || [])) {
+          const b = (it.users || []).find(u => u.role === "BUYER");
+          const ph = String((b && b.user && (b.user.cellphone || b.user.phone)) || "").replace(/\D/g, "");
+          if (ph.length >= 8) bought.add(ph.slice(-8));
+        }
+        hotmartOk = true;
+      } catch (e) { console.warn("[triage] hotmart falhou:", e.message); }
+      const last8 = l => String(l.phone).replace(/\D/g, "").slice(-8);
+      const lastUser = l => { const m = l.messages || []; for (let i = m.length - 1; i >= 0; i--) if (m[i].role === "user") return m[i].content; return ""; };
+      const compraram = esc.filter(l => bought.has(last8(l)));
+      const humano = esc.filter(l => !bought.has(last8(l)));
+      if (!confirm) return send(res, 200, { dryRun: true, hotmartOk, escalados: esc.length, jaCompraram: compraram.length, precisamHumano: humano.length, listaHumano: humano.map(l => ({ nome: l.firstName, phone: l.phone, ultimaFala: lastUser(l).slice(0, 120) })) });
+      let fechados = 0; for (const l of compraram) { store.markRecovered(l.phone, l.value || 9.9, now); fechados++; }
+      return send(res, 200, { ok: true, hotmartOk, fechados, precisamHumano: humano.length, listaHumano: humano.map(l => ({ nome: l.firstName, phone: l.phone, ultimaFala: lastUser(l).slice(0, 140) })) });
     }
     if (req.method === "GET" && url === "/api/_retry_touches") { // resgata leads presos em DETECTADO sem 1º toque. dry-run por padrão; confirm=true executa. reset=true reabre os INVALIDO.
       const q = new URLSearchParams(req.url.split("?")[1] || "");
