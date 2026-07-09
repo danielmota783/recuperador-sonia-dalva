@@ -9,6 +9,7 @@ const store = require("./store");
 const hotmart = require("./hotmart");
 const manychat = require("./manychat");
 const sendflow = require("./sendflow");
+const checkout = require("./checkout");
 
 // --- env ---
 function loadEnv() {
@@ -43,7 +44,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "escalados-triage-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "lote-pin-1490-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function backoff(attempt) { return Math.min(8000, 600 * Math.pow(2, attempt)) + Math.floor(Math.random() * 400); }
@@ -449,6 +450,7 @@ const server = http.createServer(async (req, res) => {
         digestEnabled: ENV.DIGEST_ENABLED === "true",
         sendflowKeySet: !!(process.env.SENDFLOW_API_KEY || ENV.SENDFLOW_API_KEY),
         loteZeroCadenceEnabled: ENV.LOTE_ZERO_CADENCE_ENABLED === "true", // régua lote zero (follow-up 30/06 + vendas 01/07)
+        loteRecuperacao: (() => { const l = checkout.vigenteLote(); return { valor: l.value, off: l.off, pinnedOff: process.env.LOTE_PIN_OFF != null ? process.env.LOTE_PIN_OFF : "tlaby17y (default no código)" }; })(), // lote que a Rosa usa pra recuperar (PIN travado em R$14,90)
         cadenceFollowupAt: (ENV.LZ_FOLLOWUP_AT || "2026-06-30 10:00") + " BRT",
         cadenceSalesAt: (ENV.LZ_SALES_AT || "2026-07-01 08:00") + " BRT",
         leads: store.allLeads().length,
