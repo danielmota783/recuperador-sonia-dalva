@@ -44,7 +44,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "lote-pin-1490-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "ghost-inalcancavel-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function backoff(attempt) { return Math.min(8000, 600 * Math.pow(2, attempt)) + Math.floor(Math.random() * 400); }
@@ -182,6 +182,7 @@ function recoveryMetrics() {
     perdidos: leads.filter(l => l.state === "PERDIDO").length,
     optouts: leads.filter(l => l.optout).length,
     invalidos: leads.filter(l => l.state === "INVALIDO").length, // número inválido no checkout (WhatsApp não alcança)
+    inalcancaveis: leads.filter(l => l.state === "INALCANCAVEL").length, // fantasma no ManyChat (só alcança se a lead escrever)
     ghost: leads.filter(l => lastRole(l) === "user" && !l.optout).length,
     recuperados: {
       total: rec.length, comToque: comToque.length, organico: organico.length,
@@ -288,6 +289,10 @@ async function retryStuckTouches(now, cap = 12) {
       done.push({ phone, nome: l.firstName, ok: true });
     } catch (e) {
       if (isInvalidWhatsapp(e.message)) { store.setState(phone, "INVALIDO", now); done.push({ phone, nome: l.firstName, invalido: true }); }
+      // Contato FANTASMA no ManyChat: wa_id existe mas nenhum lookup acha (sem custom field, sem
+      // phone system field). Retentar nunca resolve — só a própria lead mandando mensagem. Estado
+      // terminal próprio (≠ INVALIDO: o número é válido). Reversível via /api/_retry_touches?reset=true.
+      else if (/already exists/i.test(e.message)) { store.setState(phone, "INALCANCAVEL", now); done.push({ phone, nome: l.firstName, inalcancavel: true }); }
       else { done.push({ phone, nome: l.firstName, erro: e.message }); recordErr("retryTouch", e); }
     }
     await sleep(300);
@@ -409,13 +414,13 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url === "/api/_retry_touches") { // resgata leads presos em DETECTADO sem 1º toque. dry-run por padrão; confirm=true executa. reset=true reabre os INVALIDO.
       const q = new URLSearchParams(req.url.split("?")[1] || "");
       if (q.get("key") !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
-      if (q.get("reset") === "true") { // reabre leads marcados INVALIDO por engano (voltam pra fila de toque)
-        for (const l of store.allLeads().filter(l => l.state === "INVALIDO" && (l.sck === "recuperacao" || l.gatilho === "ingresso_cartao"))) store.setState(l.phone, "DETECTADO", Date.now());
+      if (q.get("reset") === "true") { // reabre leads marcados INVALIDO/INALCANCAVEL por engano (voltam pra fila de toque)
+        for (const l of store.allLeads().filter(l => ["INVALIDO", "INALCANCAVEL"].includes(l.state) && (l.sck === "recuperacao" || l.gatilho === "ingresso_cartao"))) store.setState(l.phone, "DETECTADO", Date.now());
       }
       const stuck = store.allLeads().filter(l => l.state === "DETECTADO" && !l.firstTouchAt && !l.optout && (l.sck === "recuperacao" || l.gatilho === "ingresso_cartao") && !isTestLead(l));
       if (q.get("confirm") !== "true") return send(res, 200, { dryRun: true, travados: stuck.length, amostra: stuck.slice(0, 20).map(l => ({ nome: l.firstName, phone: l.phone, normalizado: toE164BR(l.phone), gatilho: l.gatilho })) });
       const done = await retryStuckTouches(Date.now(), Number(q.get("cap")) || 30);
-      return send(res, 200, { ok: true, tentados: done.length, tocados: done.filter(d => d.ok).length, invalidos: done.filter(d => d.invalido).length, erros: done.filter(d => d.erro), detalhe: done });
+      return send(res, 200, { ok: true, tentados: done.length, tocados: done.filter(d => d.ok).length, invalidos: done.filter(d => d.invalido).length, inalcancaveis: done.filter(d => d.inalcancavel).length, erros: done.filter(d => d.erro), detalhe: done });
     }
     if (req.method === "GET" && url === "/api/_lasthook") {
       const key = new URLSearchParams(req.url.split("?")[1] || "").get("key");
