@@ -51,6 +51,9 @@ const setCustomField = (subscriberId, fieldId, value) =>
 const addTag = (subscriberId, tagId) =>
   mc("/fb/subscriber/addTag", "POST", { subscriber_id: subscriberId, tag_id: tagId });
 
+const addTagByName = (subscriberId, tagName) =>
+  mc("/fb/subscriber/addTagByName", "POST", { subscriber_id: subscriberId, tag_name: tagName });
+
 // --- Envio ---
 // 1º toque (fora da janela 24h): dispara um FLUXO do ManyChat que contém o template aprovado.
 const sendFlow = (subscriberId, flowNs) =>
@@ -116,4 +119,4 @@ async function sendTextToPhone(phone, text, firstName) {
   return id;
 }
 
-module.exports = { mc, getInfo, findByPhone, findByCustomField, getFlows, createSubscriber, setCustomField, addTag, sendFlow, sendText, resolveId, firstTouch, sendTextToPhone };
+module.exports = { mc, getInfo, findByPhone, findByCustomField, getFlows, createSubscriber, setCustomField, addTag, addTagByName, sendFlow, sendText, resolveId, firstTouch, sendTextToPhone };

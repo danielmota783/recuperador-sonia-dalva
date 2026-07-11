@@ -10,6 +10,7 @@ const hotmart = require("./hotmart");
 const manychat = require("./manychat");
 const sendflow = require("./sendflow");
 const checkout = require("./checkout");
+const onboarding = require("./onboarding");
 
 // --- env ---
 function loadEnv() {
@@ -44,7 +45,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "ghost-inalcancavel-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "onboarding-nativo-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function backoff(attempt) { return Math.min(8000, 600 * Math.pow(2, attempt)) + Math.floor(Math.random() * 400); }
@@ -218,7 +219,7 @@ function parseHotmart(p) {
     // só vira "cartão recusado" se o pagamento foi por CARTÃO; cancelamento de pix/boleto NÃO recebe a msg de cartão
     if (isCard || p.event === "cartao") { kind = "detect"; gatilho = "ingresso_cartao"; }
   }
-  return { kind, phone, firstName, product: productType, gatilho, value, sck, status, payType };
+  return { kind, phone, firstName, product: productType, productId, gatilho, value, sck, status, payType };
 }
 
 // --- 1º TOQUE via ManyChat (template aprovado) ---
@@ -427,6 +428,44 @@ const server = http.createServer(async (req, res) => {
       if (key !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
       return send(res, 200, lastHotmart || { vazio: true });
     }
+    // --- ONBOARDING nativo (ex-Make 9452875): métricas ---
+    if (req.method === "GET" && url === "/api/onboarding") {
+      const key = new URLSearchParams(req.url.split("?")[1] || "").get("key");
+      if (key !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
+      return send(res, 200, onboarding.metrics());
+    }
+    // --- BACKFILL do onboarding: compradoras aprovadas na Hotmart SEM disparo (gap do Make pausado).
+    // Janela começa logo APÓS a última execução do Make (08/07 17:24:59Z) pra não reenviar a quem já
+    // recebeu. dry-run por padrão; confirm=true dispara (throttle 400ms, cap). Idempotente (onboarding.json).
+    if (req.method === "GET" && url === "/api/_onboard_backfill") {
+      const q = new URLSearchParams(req.url.split("?")[1] || "");
+      if (q.get("key") !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
+      const now = Date.now();
+      const since = Number(q.get("since") || 1783531500000); // 2026-07-08T17:25:00Z = fim da última execução do Make
+      const cap = Number(q.get("cap") || 150);
+      const tok = await hotmart.token();
+      const params = new URLSearchParams({ transaction_status: "APPROVED", product_id: "7860446", start_date: String(since), end_date: String(now), max_results: "500" }).toString();
+      const r = await fetch("https://developers.hotmart.com/payments/api/v1/sales/users?" + params, { headers: { Authorization: "Bearer " + tok } });
+      const d = await r.json();
+      const buyers = new Map(); // dedup por últimos 8 dígitos
+      for (const it of (d.items || [])) {
+        const b = (it.users || []).find(u => u.role === "BUYER");
+        const u = b && b.user; if (!u) continue;
+        const ph = String(u.cellphone || u.phone || "").replace(/\D/g, "");
+        if (ph.length < 10) continue;
+        if (!buyers.has(ph.slice(-8))) buyers.set(ph.slice(-8), { phone: ph, firstName: String(u.name || "amiga").split(" ")[0] });
+      }
+      const pend = [...buyers.values()].filter(b => !onboarding.alreadySent(b.phone));
+      if (q.get("confirm") !== "true")
+        return send(res, 200, { dryRun: true, desde: new Date(since).toISOString(), compradorasJanela: buyers.size, pendentes: pend.length, amostra: pend.slice(0, 20) });
+      const out = [];
+      for (const b of pend.slice(0, cap)) {
+        const r2 = await onboarding.onboardBuyer({ phone: b.phone, firstName: b.firstName, source: "backfill" });
+        out.push({ phone: b.phone, nome: b.firstName, ...r2 });
+        await sleep(400);
+      }
+      return send(res, 200, { ok: true, tentados: out.length, enviados: out.filter(x => x.ok && !x.skip).length, jaEnviados: out.filter(x => x.skip === "ja_enviado").length, falhas: out.filter(x => !x.ok).map(x => ({ phone: x.phone, nome: x.nome, erro: x.error || x.skip })) });
+    }
     if (req.method === "GET" && url === "/api/_version") {
       return send(res, 200, { build: BUILD });
     }
@@ -460,6 +499,7 @@ const server = http.createServer(async (req, res) => {
         cadenceSalesAt: (ENV.LZ_SALES_AT || "2026-07-01 08:00") + " BRT",
         leads: store.allLeads().length,
         leadsLoteZero: store.allLeads().filter(l => l.gatilho === "lote_zero").length,
+        onboarding: (() => { const m = onboarding.metrics(); return { enabled: m.enabled, enviados: m.enviados, falhas: m.falhas, ultimoEnvio: m.ultimoEnvio }; })(), // onboarding nativo (ex-Make 9452875)
         lastError,
       });
     }
@@ -551,8 +591,15 @@ const server = http.createServer(async (req, res) => {
       const e = parseHotmart(payload);
       if (e.kind === "venda") {
         const lead = store.getLead(e.phone);
-        if (lead) { store.markRecovered(e.phone, e.value, now); return send(res, 200, { ok: true, action: "recuperado", phone: store.normPhone(e.phone) }); }
-        return send(res, 200, { ok: true, action: "venda_sem_lead" });
+        if (lead) store.markRecovered(e.phone, e.value, now);
+        // ONBOARDING de compradora do ingresso (substitui o cenário 9452875 do Make, pausado por
+        // teto de ops em 08/07): boas-vindas + link do grupo via flow do ManyChat. Idempotente.
+        let onboard = null;
+        if (e.productId === "7860446" && e.phone) {
+          try { onboard = await onboarding.onboardBuyer({ phone: e.phone, firstName: e.firstName, source: "webhook" }); }
+          catch (err) { onboard = { ok: false, error: err.message }; recordErr("onboarding", err); }
+        }
+        return send(res, 200, { ok: true, action: lead ? "recuperado" : "venda_sem_lead", phone: e.phone ? store.normPhone(e.phone) : null, onboarding: onboard });
       }
       if (e.kind === "detect" && e.phone) {
         // Recuperação de pix/boleto é detectada SÓ pela vigia (poll WAITING_PAYMENT): ela espera e só
