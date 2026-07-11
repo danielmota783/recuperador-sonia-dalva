@@ -26,16 +26,29 @@ function save() {
 
 const key = (phone) => String(phone || "").replace(/\D/g, "").slice(-8);
 
+// Normaliza pro E.164 BR (mesma regra do toE164BR do server): a Hotmart manda o telefone
+// SEM o 55 (ex.: "18996084180") — sem isso o ManyChat criaria número dos EUA (+1...).
+function toE164BR(p) {
+  let d = String(p || "").replace(/\D/g, "");
+  if (!d) return "";
+  if (d.startsWith("55") && (d.length === 12 || d.length === 13)) return d;
+  d = d.replace(/^0+/, "");
+  if (d.length === 10 || d.length === 11) return "55" + d;
+  if (d.startsWith("55") && d.length >= 12) return d;
+  return d;
+}
+
 // Envia o onboarding pra UMA compradora. Idempotente: se já enviado, retorna {skip:"ja_enviado"}.
 // Registra falha (com motivo) sem retentar sozinho — reprocesso via /api/_onboard_backfill.
 async function onboardBuyer({ phone, firstName, transaction, source }) {
-  const k = key(phone);
-  if (!k || k.length < 8) return { ok: false, skip: "sem_telefone" };
+  const e164 = toE164BR(phone);
+  const k = key(e164);
+  if (!k || k.length < 8 || e164.length < 12) return { ok: false, skip: "sem_telefone", phone: String(phone) };
   if (db[k] && db[k].sentAt) return { ok: true, skip: "ja_enviado", sentAt: db[k].sentAt };
   if (!ENABLED) return { ok: false, skip: "desligado" };
-  const entry = { phone: String(phone), firstName: firstName || "amiga", transaction: transaction || null, source: source || "webhook", attempts: ((db[k] && db[k].attempts) || 0) + 1 };
+  const entry = { phone: e164, firstName: firstName || "amiga", transaction: transaction || null, source: source || "webhook", attempts: ((db[k] && db[k].attempts) || 0) + 1 };
   try {
-    const id = await manychat.resolveId(phone, entry.firstName);
+    const id = await manychat.resolveId(e164, entry.firstName);
     try { await manychat.addTagByName(id, TAG_COMPROU); } catch (e) { /* tag é acessório, não bloqueia o flow */ }
     await manychat.sendFlow(id, FLOW_NS_ONBOARDING);
     db[k] = { ...entry, subscriberId: id, sentAt: new Date().toISOString(), error: null };
