@@ -594,8 +594,10 @@ const server = http.createServer(async (req, res) => {
         if (lead) store.markRecovered(e.phone, e.value, now);
         // ONBOARDING de compradora do ingresso (substitui o cenário 9452875 do Make, pausado por
         // teto de ops em 08/07): boas-vindas + link do grupo via flow do ManyChat. Idempotente.
+        // SÓ no evento APPROVED (igual ao filtro do Make): COMPLETE dispara semanas depois pra
+        // compra antiga fechando garantia — reenviava boas-vindas a quem já recebeu.
         let onboard = null;
-        if (e.productId === "7860446" && e.phone) {
+        if (e.productId === "7860446" && e.phone && /APPROVED/.test(e.status)) {
           try { onboard = await onboarding.onboardBuyer({ phone: e.phone, firstName: e.firstName, source: "webhook" }); }
           catch (err) { onboard = { ok: false, error: err.message }; recordErr("onboarding", err); }
         }
