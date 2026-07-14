@@ -119,6 +119,19 @@ function recordFollowup(phone, count, ts) {
   return lead;
 }
 
+// Registra um toque de REATIVAÇÃO (conversa que esfriou: a lead respondeu, a Rosa respondeu,
+// e a lead sumiu). Diferente do follow-up (que é pra quem NUNCA respondeu).
+function recordReengage(phone, count, ts) {
+  const db = load();
+  const lead = db.leads[normPhone(phone)];
+  if (!lead) return null;
+  lead.reengageCount = count;
+  lead.lastReengageAt = nowISO(ts);
+  lead.updatedAt = nowISO(ts);
+  persist(db);
+  return lead;
+}
+
 function markRecovered(phone, value, ts) {
   const db = load();
   const lead = db.leads[normPhone(phone)];
@@ -170,4 +183,4 @@ function metrics() {
   return m;
 }
 
-module.exports = { upsertLead, getLead, deleteLead, appendMessage, setState, markRecovered, recordFollowup, recordCadence, remapPhone, allLeads, metrics, normPhone };
+module.exports = { upsertLead, getLead, deleteLead, appendMessage, setState, markRecovered, recordFollowup, recordReengage, recordCadence, remapPhone, allLeads, metrics, normPhone };

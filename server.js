@@ -45,7 +45,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "onboarding-nativo-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "reengage-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function backoff(attempt) { return Math.min(8000, 600 * Math.pow(2, attempt)) + Math.floor(Math.random() * 400); }
@@ -412,6 +412,13 @@ const server = http.createServer(async (req, res) => {
       let fechados = 0; for (const l of compraram) { store.markRecovered(l.phone, l.value || 9.9, now); fechados++; }
       return send(res, 200, { ok: true, hotmartOk, fechados, precisamHumano: humano.length, listaHumano: humano.map(l => ({ nome: l.firstName, phone: l.phone, ultimaFala: lastUser(l).slice(0, 140) })) });
     }
+    if (req.method === "GET" && url === "/api/_reengage") { // reativa conversas frias (lead respondeu e sumiu) na janela 24h. dry-run por padrão; confirm=true dispara (força fora do horário).
+      const q = new URLSearchParams(req.url.split("?")[1] || "");
+      if (q.get("key") !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
+      if (q.get("confirm") === "true") return send(res, 200, await runReengage(true));
+      const { naJanela, foraJanela } = reengageAlvos(Date.now());
+      return send(res, 200, { dryRun: true, enabled: REENGAGE_ENABLED, naJanela: naJanela.length, foraJanela: foraJanela.length, amostra: naJanela.slice(0, 15).map(l => ({ nome: l.firstName, phone: l.phone, jaReativado: l.reengageCount || 0 })), notaForaJanela: "janela 24h fechada — precisam de template (fase 2)" });
+    }
     if (req.method === "GET" && url === "/api/_retry_touches") { // resgata leads presos em DETECTADO sem 1º toque. dry-run por padrão; confirm=true executa. reset=true reabre os INVALIDO.
       const q = new URLSearchParams(req.url.split("?")[1] || "");
       if (q.get("key") !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
@@ -491,6 +498,7 @@ const server = http.createServer(async (req, res) => {
         webhookHotmartRecebido: !!lastHotmart, // Hotmart já postou no /webhook/hotmart? (detecção de cartão depende disso)
         cacheUsage: lastUsage ? { input: lastUsage.input_tokens, cacheWrite: lastUsage.cache_creation_input_tokens, cacheRead: lastUsage.cache_read_input_tokens, output: lastUsage.output_tokens } : null,
         followupEnabled: ENV.FOLLOWUP_ENABLED === "true",
+        reengageEnabled: ENV.REENGAGE_ENABLED === "true", // régua de reativação de conversa fria (janela 24h)
         digestEnabled: ENV.DIGEST_ENABLED === "true",
         sendflowKeySet: !!(process.env.SENDFLOW_API_KEY || ENV.SENDFLOW_API_KEY),
         loteZeroCadenceEnabled: ENV.LOTE_ZERO_CADENCE_ENABLED === "true", // régua lote zero (follow-up 30/06 + vendas 01/07)
@@ -722,6 +730,67 @@ if (FOLLOWUP_ENABLED) {
   console.log(`[followup] régua ATIVA (varre ${FU_INTERVAL_MIN}/${FU_INTERVAL_MIN}min; 2º toque +${FU2_DELAY_H}h, 3º toque +${FU3_DELAY_H}h, ${FU_HOUR_START}-${FU_HOUR_END}h BRT)`);
 } else {
   console.warn("[followup] régua DESLIGADA (FOLLOWUP_ENABLED!=true)");
+}
+
+// --- RÉGUA DE REATIVAÇÃO (conversa que ESFRIOU: a lead respondeu e sumiu) ---
+// Diferente do follow-up (que é pra quem NUNCA respondeu). Aqui a Rosa VOLTA a falar para
+// manter a conversa viva, aproveitando a JANELA DE 24h (mensagem livre, sem template) enquanto
+// ela está aberta. Passou de 24h desde a última fala da lead → janela fechada, precisa template (fase 2).
+const REENGAGE_ENABLED = ENV.REENGAGE_ENABLED === "true";
+const REENGAGE_DELAY_H = Number(ENV.REENGAGE_DELAY_H || 5);       // horas de silêncio antes de reativar
+const REENGAGE_MAX = Number(ENV.REENGAGE_MAX || 2);              // máx. reativações por lead
+const REENGAGE_INTERVAL_MIN = Number(ENV.REENGAGE_INTERVAL_MIN || 20);
+const REENGAGE_HOUR_START = Number(ENV.REENGAGE_HOUR_START || 8);
+const REENGAGE_HOUR_END = Number(ENV.REENGAGE_HOUR_END || 21);
+const REENGAGE_NUDGE = "(Sistema: a pessoa leu e ficou em silêncio depois da sua última mensagem. Mande UMA mensagem curta e natural para manter a conversa viva e reaquecer, retomando de onde parou, sem repetir a saudação nem o que você já disse. Se fizer sentido, lembre com leveza que o link está aí e o lugar dela continua guardado. Tom de cuidado, nunca de cobrança.)";
+
+// elegíveis para reativação AGORA: EM_CONVERSA da recuperação, Rosa falou por último,
+// silêncio >= REENGAGE_DELAY_H, ainda não estourou o máximo. Separa janela aberta (<24h) de fechada.
+function reengageAlvos(now) {
+  const DIA = 24 * 3600 * 1000, naJanela = [], foraJanela = [];
+  for (const lead of store.allLeads()) {
+    if (lead.optout || lead.state !== "EM_CONVERSA") continue;
+    if (!(lead.sck === "recuperacao" || lead.gatilho === "ingresso_cartao")) continue;
+    if (isTestLead(lead)) continue;
+    const msgs = lead.messages || [];
+    if (!msgs.length || msgs[msgs.length - 1].role !== "assistant") continue; // a Rosa falou por último
+    if ((lead.reengageCount || 0) >= REENGAGE_MAX) continue;
+    if ((now - Date.parse(msgs[msgs.length - 1].ts)) / 3600000 < REENGAGE_DELAY_H) continue;
+    let lastInbound = 0;
+    for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === "user") { lastInbound = Date.parse(msgs[i].ts); break; }
+    if (lastInbound && now - lastInbound < DIA) naJanela.push(lead); else foraJanela.push(lead);
+  }
+  return { naJanela, foraJanela };
+}
+
+async function runReengage(force) {
+  if (!REENGAGE_ENABLED && !force) return { skip: "desligado" };
+  const now = Date.now();
+  const h = horaBRT(now);
+  if (!force && (h < REENGAGE_HOUR_START || h >= REENGAGE_HOUR_END)) return { skip: `fora do horario (${h}h BRT)` };
+  const { naJanela, foraJanela } = reengageAlvos(now);
+  const enviados = [];
+  for (const lead of naJanela) {
+    try {
+      const history = (lead.messages || []).map(m => ({ role: m.role, content: m.content }));
+      history.push({ role: "user", content: REENGAGE_NUDGE });
+      const reply = await callClaude(systemPrompt(lead.gatilho, lead), history);
+      await manychat.sendTextToPhone(lead.phone, reply, lead.firstName);
+      store.appendMessage(lead.phone, "assistant", reply, Date.now());
+      store.recordReengage(lead.phone, (lead.reengageCount || 0) + 1, Date.now());
+      enviados.push({ phone: lead.phone, nome: lead.firstName, n: (lead.reengageCount || 0) + 1 });
+      await sleep(400);
+    } catch (e) { console.warn("[reengage]", lead.phone, e.message); }
+  }
+  if (enviados.length) console.log("[reengage]", JSON.stringify(enviados));
+  return { enviados: enviados.length, detalhe: enviados, foraJanela: foraJanela.length };
+}
+
+if (REENGAGE_ENABLED) {
+  setInterval(() => runReengage().catch(e => console.warn("[reengage]", e.message)), REENGAGE_INTERVAL_MIN * 60 * 1000);
+  console.log(`[reengage] régua de reativação ATIVA (varre ${REENGAGE_INTERVAL_MIN}min; após ${REENGAGE_DELAY_H}h de silêncio, máx ${REENGAGE_MAX}, ${REENGAGE_HOUR_START}-${REENGAGE_HOUR_END}h BRT, só janela 24h aberta)`);
+} else {
+  console.warn("[reengage] régua de reativação DESLIGADA (REENGAGE_ENABLED!=true)");
 }
 
 // --- DIGEST DIÁRIO (resumo de métricas no WhatsApp do Daniel, via SendFlow) ---
