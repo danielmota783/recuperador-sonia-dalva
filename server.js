@@ -46,7 +46,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "raiox-feed-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "raiox-entrega-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function backoff(attempt) { return Math.min(8000, 600 * Math.pow(2, attempt)) + Math.floor(Math.random() * 400); }
@@ -540,7 +540,7 @@ const server = http.createServer(async (req, res) => {
         followupEnabled: ENV.FOLLOWUP_ENABLED === "true",
         reengageEnabled: ENV.REENGAGE_ENABLED === "true", // régua de reativação de conversa fria (janela 24h)
         promoAniversario: ENV.PROMO_ANIV_ATE ? { ate: ENV.PROMO_ANIV_ATE, ativa: Date.now() < Date.parse(ENV.PROMO_ANIV_ATE) } : { ativa: false }, // Raio-X do Perfil no fechamento da Rosa
-        raioxFeed: { webhookConfigurado: !!SHEET_WEBHOOK_URL, jaNaPlanilha: raiox.metrics().total }, // feed automático da planilha do Raio-X
+        raioxFeed: { webhookConfigurado: !!SHEET_WEBHOOK_URL, flowIndividualConfigurado: !!FLOW_NS_RAIOX, entregues: raiox.metrics().total }, // feed do Raio-X: planilha (acesso) + flow (entrega individual)
         digestEnabled: ENV.DIGEST_ENABLED === "true",
         sendflowKeySet: !!(process.env.SENDFLOW_API_KEY || ENV.SENDFLOW_API_KEY),
         loteZeroCadenceEnabled: ENV.LOTE_ZERO_CADENCE_ENABLED === "true", // régua lote zero (follow-up 30/06 + vendas 01/07)
@@ -778,8 +778,9 @@ if (FOLLOWUP_ENABLED) {
 // Escreve via um Apps Script (webhook) publicado na planilha. Gated: só enquanto a promo está ativa
 // e só a oferta do aniversário. Idempotente por e-mail (raiox.json).
 const SHEET_WEBHOOK_URL = ENV.SHEET_WEBHOOK_URL || null;
+const FLOW_NS_RAIOX = ENV.FLOW_NS_RAIOX || null; // flow ManyChat do template de ENTREGA do Raio-X (envio individual no WhatsApp)
 async function runRaioxSync(force) {
-  if (!SHEET_WEBHOOK_URL) return { skip: "sem SHEET_WEBHOOK_URL" };
+  if (!SHEET_WEBHOOK_URL && !FLOW_NS_RAIOX) return { skip: "nada configurado (SHEET_WEBHOOK_URL e/ou FLOW_NS_RAIOX)" };
   const promoAtiva = ENV.PROMO_ANIV_ATE && Date.now() < Date.parse(ENV.PROMO_ANIV_ATE);
   if (!promoAtiva && !force) return { skip: "promo inativa" };
   const now = Date.now();
@@ -800,12 +801,20 @@ async function runRaioxSync(force) {
     const email = String(u.email || "").trim().toLowerCase(); if (!email) continue;
     if (raiox.jaEnviado(email)) continue;
     const nome = txAlvo.get(it.transaction) || String(u.name || "").trim();
-    try {
-      const r = await fetch(SHEET_WEBHOOK_URL, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ nome, email }) });
-      if (r.ok) { raiox.marcar(email, nome); novos.push({ nome, email }); }
-      else console.warn("[raiox] webhook", r.status);
-    } catch (e) { console.warn("[raiox]", email, e.message); }
-    await sleep(200);
+    const phone = toE164BR(u.cellphone || u.phone || "");
+    let okSheet = true, okFlow = true;
+    // 1) ACESSO: joga o e-mail na planilha da ferramenta (se o feed estiver configurado)
+    if (SHEET_WEBHOOK_URL) {
+      try { const r = await fetch(SHEET_WEBHOOK_URL, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ nome, email }) }); okSheet = r.ok; if (!r.ok) console.warn("[raiox] sheet", r.status); }
+      catch (e) { okSheet = false; console.warn("[raiox] sheet", email, e.message); }
+    }
+    // 2) ENTREGA: manda o template do Raio-X no WhatsApp individual da compradora (se o flow existir)
+    if (FLOW_NS_RAIOX && phone) {
+      try { await manychat.firstTouch({ phone, firstName: nome, flowNs: FLOW_NS_RAIOX }); }
+      catch (e) { okFlow = false; console.warn("[raiox] flow", phone, e.message); }
+    }
+    if (okSheet && okFlow) { raiox.marcar(email, nome); novos.push({ nome, email, phone }); }
+    await sleep(250);
   }
   if (novos.length) console.log("[raiox]", JSON.stringify(novos));
   return { enviados: novos.length, detalhe: novos, jaNaPlanilha: raiox.metrics().total };
