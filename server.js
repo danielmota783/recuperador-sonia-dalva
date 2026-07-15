@@ -45,7 +45,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "reengage-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "aniversario-raiox-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function backoff(attempt) { return Math.min(8000, 600 * Math.pow(2, attempt)) + Math.floor(Math.random() * 400); }
@@ -444,6 +444,27 @@ const server = http.createServer(async (req, res) => {
     // --- BACKFILL do onboarding: compradoras aprovadas na Hotmart SEM disparo (gap do Make pausado).
     // Janela começa logo APÓS a última execução do Make (08/07 17:24:59Z) pra não reenviar a quem já
     // recebeu. dry-run por padrão; confirm=true dispara (throttle 400ms, cap). Idempotente (onboarding.json).
+    if (req.method === "GET" && url === "/api/_bonus_raiox") { // compradoras do aniversário (nome+email) desde o corte (default 15h BRT hoje), prontas pra colar na planilha do Raio-X
+      const q = new URLSearchParams(req.url.split("?")[1] || "");
+      if (q.get("key") !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
+      const now = Date.now();
+      const corte = new Date(); corte.setUTCHours(18, 0, 0, 0); // 15h BRT de hoje (início da live)
+      const since = Number(q.get("since")) || corte.getTime();
+      const tok = await hotmart.token();
+      const params = new URLSearchParams({ transaction_status: "APPROVED", product_id: "7860446", start_date: String(since), end_date: String(now), max_results: "500" }).toString();
+      const r = await fetch("https://developers.hotmart.com/payments/api/v1/sales/users?" + params, { headers: { Authorization: "Bearer " + tok } });
+      const d = await r.json();
+      const byEmail = new Map(); // dedup por e-mail (chave de acesso confiável)
+      for (const it of (d.items || [])) {
+        const b = (it.users || []).find(u => u.role === "BUYER");
+        const u = b && b.user; if (!u) continue;
+        const email = String(u.email || "").trim().toLowerCase();
+        if (!email) continue;
+        if (!byEmail.has(email)) byEmail.set(email, String(u.name || "").trim());
+      }
+      const linhas = [...byEmail.entries()].map(([email, nome]) => `${nome}\t${email}`);
+      return send(res, 200, { desde: new Date(since).toISOString(), total: byEmail.size, colar: linhas.join("\n") });
+    }
     if (req.method === "GET" && url === "/api/_onboard_backfill") {
       const q = new URLSearchParams(req.url.split("?")[1] || "");
       if (q.get("key") !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
@@ -499,6 +520,7 @@ const server = http.createServer(async (req, res) => {
         cacheUsage: lastUsage ? { input: lastUsage.input_tokens, cacheWrite: lastUsage.cache_creation_input_tokens, cacheRead: lastUsage.cache_read_input_tokens, output: lastUsage.output_tokens } : null,
         followupEnabled: ENV.FOLLOWUP_ENABLED === "true",
         reengageEnabled: ENV.REENGAGE_ENABLED === "true", // régua de reativação de conversa fria (janela 24h)
+        promoAniversario: ENV.PROMO_ANIV_ATE ? { ate: ENV.PROMO_ANIV_ATE, ativa: Date.now() < Date.parse(ENV.PROMO_ANIV_ATE) } : { ativa: false }, // Raio-X do Perfil no fechamento da Rosa
         digestEnabled: ENV.DIGEST_ENABLED === "true",
         sendflowKeySet: !!(process.env.SENDFLOW_API_KEY || ENV.SENDFLOW_API_KEY),
         loteZeroCadenceEnabled: ENV.LOTE_ZERO_CADENCE_ENABLED === "true", // régua lote zero (follow-up 30/06 + vendas 01/07)

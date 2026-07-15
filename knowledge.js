@@ -164,16 +164,29 @@ function fill(tpl, lead, linkOverride) {
     .split("{{LINK}}").join(link || "o link da sua compra");
 }
 
+// PROMO DE ANIVERSÁRIO (só recuperação): enquanto now < PROMO_ANIV_ATE, a Rosa usa o Raio-X do
+// Perfil como empurrão de fechamento. Passou do prazo → some sozinho (sem precisar redeployar).
+const PROMO_ANIV_ATE = process.env.PROMO_ANIV_ATE ? Date.parse(process.env.PROMO_ANIV_ATE) : 0;
+function promoAtiva() { return PROMO_ANIV_ATE && Date.now() < PROMO_ANIV_ATE; }
+const BIRTHDAY_BLOCK = `
+
+PRESENTE DE ANIVERSÁRIO DA SONIA (ativo só hoje — use como FECHAMENTO, nunca como abertura):
+- Hoje é aniversário da Sonia. Quem garantir o ingresso HOJE ganha um presente: o "Raio-X do Perfil" — uma análise do perfil dela, feita pela ferramenta da Sonia, uma vez.
+- Use como empurrão final de quem hesita ("vou ver depois", "vou pensar", pergunta de preço). Ex.: "E hoje tem um detalhe: é aniversário da Sonia. Quem entra hoje ainda ganha o Raio-X do seu perfil, uma análise para ver o que está travando as suas vendas. Só até meia-noite."
+- NUNCA prometa que a análise garante resultado ou venda — é um diagnóstico do perfil. O que resolve de verdade são os 2 dias da imersão.
+- Não repita em toda mensagem. Ofereça uma vez, no momento certo do fechamento.`;
+function withPromo(s) { return promoAtiva() ? s + BIRTHDAY_BLOCK : s; }
+
 function systemPrompt(gatilhoKey, lead) {
   // captação lote zero — Rosa leva para o GRUPO (menor preço R$9,90 cai dentro do grupo)
   if (gatilhoKey === "lote_zero")
     return PROMPTS.LOTE_ZERO.split("{{VALOR}}").join(checkout.LOTE_ZERO_VALOR).split("{{GRUPO}}").join(checkout.GRUPO_LOTE_ZERO);
   // chat da página de vendas (pré-venda) — Rosa suporte, link da página
   if (gatilhoKey === "suporte_pagina") return fill(PROMPTS.SUPORTE, null, checkout.pageLink());
-  // prompts blindados dedicados (voz Rosa + anti-erro verificado, link/preço por lote)
-  if (gatilhoKey === "ingresso_pix") return fill(PROMPTS.PIX, lead);
-  if (gatilhoKey === "ingresso_boleto") return fill(PROMPTS.BOLETO, lead);
-  if (gatilhoKey === "ingresso_cartao") return fill(PROMPTS.CARTAO, lead);
+  // prompts blindados dedicados (voz Rosa + anti-erro verificado, link/preço por lote) — com promo de aniversário quando ativa
+  if (gatilhoKey === "ingresso_pix") return withPromo(fill(PROMPTS.PIX, lead));
+  if (gatilhoKey === "ingresso_boleto") return withPromo(fill(PROMPTS.BOLETO, lead));
+  if (gatilhoKey === "ingresso_cartao") return withPromo(fill(PROMPTS.CARTAO, lead));
   const g = GATILHOS[gatilhoKey] || GATILHOS.ingresso_abandono;
   const link = checkout.checkoutLink(lead);
   const dados = link
