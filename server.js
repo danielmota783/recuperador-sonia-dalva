@@ -45,7 +45,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "aniversario-raiox-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "aniversario-raiox-v2"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function backoff(attempt) { return Math.min(8000, 600 * Math.pow(2, attempt)) + Math.floor(Math.random() * 400); }
@@ -450,20 +450,32 @@ const server = http.createServer(async (req, res) => {
       const now = Date.now();
       const corte = new Date(); corte.setUTCHours(18, 0, 0, 0); // 15h BRT de hoje (início da live)
       const since = Number(q.get("since")) || corte.getTime();
+      const OFERTA = q.get("off") || ENV.OFERTA_ANIVERSARIO || "tlaby17y"; // SÓ o link de R$14,90 (oferta fechada base/live/Rosa); exclui anúncio/página (R$19,90)
       const tok = await hotmart.token();
-      const params = new URLSearchParams({ transaction_status: "APPROVED", product_id: "7860446", start_date: String(since), end_date: String(now), max_results: "500" }).toString();
-      const r = await fetch("https://developers.hotmart.com/payments/api/v1/sales/users?" + params, { headers: { Authorization: "Bearer " + tok } });
-      const d = await r.json();
+      const base = `transaction_status=APPROVED&product_id=7860446&start_date=${since}&end_date=${now}&max_results=500`;
+      // 1) sales/history: oferta + transação → fica só quem comprou na oferta do aniversário
+      const rh = await fetch("https://developers.hotmart.com/payments/api/v1/sales/history?" + base, { headers: { Authorization: "Bearer " + tok } });
+      const dh = await rh.json();
+      const txAlvo = new Map(); // transaction → nome (do buyer no history)
+      for (const it of (dh.items || [])) {
+        const pu = it.purchase || {};
+        if (!pu.offer || pu.offer.code !== OFERTA) continue;
+        if (pu.transaction) txAlvo.set(pu.transaction, String((it.buyer && it.buyer.name) || "").trim());
+      }
+      // 2) sales/users: e-mail por transação → junta com as transações-alvo
+      const ru = await fetch("https://developers.hotmart.com/payments/api/v1/sales/users?" + base, { headers: { Authorization: "Bearer " + tok } });
+      const du = await ru.json();
       const byEmail = new Map(); // dedup por e-mail (chave de acesso confiável)
-      for (const it of (d.items || [])) {
+      for (const it of (du.items || [])) {
+        if (!txAlvo.has(it.transaction)) continue;
         const b = (it.users || []).find(u => u.role === "BUYER");
         const u = b && b.user; if (!u) continue;
         const email = String(u.email || "").trim().toLowerCase();
         if (!email) continue;
-        if (!byEmail.has(email)) byEmail.set(email, String(u.name || "").trim());
+        if (!byEmail.has(email)) byEmail.set(email, txAlvo.get(it.transaction) || String(u.name || "").trim());
       }
       const linhas = [...byEmail.entries()].map(([email, nome]) => `${nome}\t${email}`);
-      return send(res, 200, { desde: new Date(since).toISOString(), total: byEmail.size, colar: linhas.join("\n") });
+      return send(res, 200, { desde: new Date(since).toISOString(), oferta: OFERTA, total: byEmail.size, colar: linhas.join("\n") });
     }
     if (req.method === "GET" && url === "/api/_onboard_backfill") {
       const q = new URLSearchParams(req.url.split("?")[1] || "");
