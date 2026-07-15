@@ -10,6 +10,7 @@ const hotmart = require("./hotmart");
 const manychat = require("./manychat");
 const sendflow = require("./sendflow");
 const checkout = require("./checkout");
+const raiox = require("./raiox");
 const onboarding = require("./onboarding");
 
 // --- env ---
@@ -45,7 +46,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "aniversario-raiox-v2"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "raiox-feed-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function backoff(attempt) { return Math.min(8000, 600 * Math.pow(2, attempt)) + Math.floor(Math.random() * 400); }
@@ -444,6 +445,12 @@ const server = http.createServer(async (req, res) => {
     // --- BACKFILL do onboarding: compradoras aprovadas na Hotmart SEM disparo (gap do Make pausado).
     // Janela começa logo APÓS a última execução do Make (08/07 17:24:59Z) pra não reenviar a quem já
     // recebeu. dry-run por padrão; confirm=true dispara (throttle 400ms, cap). Idempotente (onboarding.json).
+    if (req.method === "GET" && url === "/api/_raiox_sync") { // força o feed do Raio-X (joga novas compradoras de R$14,90 na planilha via Apps Script). status + envio.
+      const q = new URLSearchParams(req.url.split("?")[1] || "");
+      if (q.get("key") !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
+      const r = await runRaioxSync(true);
+      return send(res, 200, { webhookConfigurado: !!SHEET_WEBHOOK_URL, ...r });
+    }
     if (req.method === "GET" && url === "/api/_bonus_raiox") { // compradoras do aniversário (nome+email) desde o corte (default 15h BRT hoje), prontas pra colar na planilha do Raio-X
       const q = new URLSearchParams(req.url.split("?")[1] || "");
       if (q.get("key") !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
@@ -533,6 +540,7 @@ const server = http.createServer(async (req, res) => {
         followupEnabled: ENV.FOLLOWUP_ENABLED === "true",
         reengageEnabled: ENV.REENGAGE_ENABLED === "true", // régua de reativação de conversa fria (janela 24h)
         promoAniversario: ENV.PROMO_ANIV_ATE ? { ate: ENV.PROMO_ANIV_ATE, ativa: Date.now() < Date.parse(ENV.PROMO_ANIV_ATE) } : { ativa: false }, // Raio-X do Perfil no fechamento da Rosa
+        raioxFeed: { webhookConfigurado: !!SHEET_WEBHOOK_URL, jaNaPlanilha: raiox.metrics().total }, // feed automático da planilha do Raio-X
         digestEnabled: ENV.DIGEST_ENABLED === "true",
         sendflowKeySet: !!(process.env.SENDFLOW_API_KEY || ENV.SENDFLOW_API_KEY),
         loteZeroCadenceEnabled: ENV.LOTE_ZERO_CADENCE_ENABLED === "true", // régua lote zero (follow-up 30/06 + vendas 01/07)
@@ -764,6 +772,49 @@ if (FOLLOWUP_ENABLED) {
   console.log(`[followup] régua ATIVA (varre ${FU_INTERVAL_MIN}/${FU_INTERVAL_MIN}min; 2º toque +${FU2_DELAY_H}h, 3º toque +${FU3_DELAY_H}h, ${FU_HOUR_START}-${FU_HOUR_END}h BRT)`);
 } else {
   console.warn("[followup] régua DESLIGADA (FOLLOWUP_ENABLED!=true)");
+}
+
+// --- FEED DO BÔNUS RAIO-X: joga compradoras de R$14,90 na planilha da ferramenta em tempo real ---
+// Escreve via um Apps Script (webhook) publicado na planilha. Gated: só enquanto a promo está ativa
+// e só a oferta do aniversário. Idempotente por e-mail (raiox.json).
+const SHEET_WEBHOOK_URL = ENV.SHEET_WEBHOOK_URL || null;
+async function runRaioxSync(force) {
+  if (!SHEET_WEBHOOK_URL) return { skip: "sem SHEET_WEBHOOK_URL" };
+  const promoAtiva = ENV.PROMO_ANIV_ATE && Date.now() < Date.parse(ENV.PROMO_ANIV_ATE);
+  if (!promoAtiva && !force) return { skip: "promo inativa" };
+  const now = Date.now();
+  const corte = new Date(); corte.setUTCHours(18, 0, 0, 0); // 15h BRT (início da live)
+  const since = Number(ENV.RAIOX_SINCE) || corte.getTime();
+  const OFERTA = ENV.OFERTA_ANIVERSARIO || "tlaby17y";
+  const tok = await hotmart.token();
+  const base = `transaction_status=APPROVED&product_id=7860446&start_date=${since}&end_date=${now}&max_results=500`;
+  const H = { headers: { Authorization: "Bearer " + tok } };
+  const dh = await (await fetch("https://developers.hotmart.com/payments/api/v1/sales/history?" + base, H)).json();
+  const txAlvo = new Map();
+  for (const it of (dh.items || [])) { const pu = it.purchase || {}; if (pu.offer && pu.offer.code === OFERTA && pu.transaction) txAlvo.set(pu.transaction, String((it.buyer && it.buyer.name) || "").trim()); }
+  const du = await (await fetch("https://developers.hotmart.com/payments/api/v1/sales/users?" + base, H)).json();
+  const novos = [];
+  for (const it of (du.items || [])) {
+    if (!txAlvo.has(it.transaction)) continue;
+    const b = (it.users || []).find(u => u.role === "BUYER"); const u = b && b.user; if (!u) continue;
+    const email = String(u.email || "").trim().toLowerCase(); if (!email) continue;
+    if (raiox.jaEnviado(email)) continue;
+    const nome = txAlvo.get(it.transaction) || String(u.name || "").trim();
+    try {
+      const r = await fetch(SHEET_WEBHOOK_URL, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ nome, email }) });
+      if (r.ok) { raiox.marcar(email, nome); novos.push({ nome, email }); }
+      else console.warn("[raiox] webhook", r.status);
+    } catch (e) { console.warn("[raiox]", email, e.message); }
+    await sleep(200);
+  }
+  if (novos.length) console.log("[raiox]", JSON.stringify(novos));
+  return { enviados: novos.length, detalhe: novos, jaNaPlanilha: raiox.metrics().total };
+}
+if (SHEET_WEBHOOK_URL) {
+  setInterval(() => runRaioxSync().catch(e => console.warn("[raiox]", e.message)), 3 * 60 * 1000);
+  console.log("[raiox] feed do Raio-X ATIVO (sincroniza a cada 3 min enquanto a promo estiver ativa)");
+} else {
+  console.warn("[raiox] feed do Raio-X DESLIGADO (falta SHEET_WEBHOOK_URL)");
 }
 
 // --- RÉGUA DE REATIVAÇÃO (conversa que ESFRIOU: a lead respondeu e sumiu) ---
