@@ -46,7 +46,7 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "raiox-entrega-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "raiox-janela-15jul-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function backoff(attempt) { return Math.min(8000, 600 * Math.pow(2, attempt)) + Math.floor(Math.random() * 400); }
@@ -455,11 +455,11 @@ const server = http.createServer(async (req, res) => {
       const q = new URLSearchParams(req.url.split("?")[1] || "");
       if (q.get("key") !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
       const now = Date.now();
-      const corte = new Date(); corte.setUTCHours(18, 0, 0, 0); // 15h BRT de hoje (início da live)
-      const since = Number(q.get("since")) || corte.getTime();
+      const since = Number(q.get("since")) || Number(ENV.RAIOX_SINCE) || Date.parse("2026-07-15T03:00:00Z"); // 15/07 00h BRT (dia do aniversário)
+      const end = Number(q.get("until")) || Math.min(now, Number(ENV.RAIOX_UNTIL) || Date.parse("2026-07-16T03:00:00Z")); // 16/07 00h BRT
       const OFERTA = q.get("off") || ENV.OFERTA_ANIVERSARIO || "tlaby17y"; // SÓ o link de R$14,90 (oferta fechada base/live/Rosa); exclui anúncio/página (R$19,90)
       const tok = await hotmart.token();
-      const base = `transaction_status=APPROVED&product_id=7860446&start_date=${since}&end_date=${now}&max_results=500`;
+      const base = `transaction_status=APPROVED&product_id=7860446&start_date=${since}&end_date=${end}&max_results=500`;
       // 1) sales/history: oferta + transação → fica só quem comprou na oferta do aniversário
       const rh = await fetch("https://developers.hotmart.com/payments/api/v1/sales/history?" + base, { headers: { Authorization: "Bearer " + tok } });
       const dh = await rh.json();
@@ -784,11 +784,12 @@ async function runRaioxSync(force) {
   const promoAtiva = ENV.PROMO_ANIV_ATE && Date.now() < Date.parse(ENV.PROMO_ANIV_ATE);
   if (!promoAtiva && !force) return { skip: "promo inativa" };
   const now = Date.now();
-  const corte = new Date(); corte.setUTCHours(18, 0, 0, 0); // 15h BRT (início da live)
-  const since = Number(ENV.RAIOX_SINCE) || corte.getTime();
+  // janela do aniversário: dia 15/07 inteiro (BRT). Overridável por env se precisar.
+  const since = Number(ENV.RAIOX_SINCE) || Date.parse("2026-07-15T03:00:00Z"); // 15/07 00h BRT
+  const end = Math.min(now, Number(ENV.RAIOX_UNTIL) || Date.parse("2026-07-16T03:00:00Z")); // 16/07 00h BRT (fim do dia 15)
   const OFERTA = ENV.OFERTA_ANIVERSARIO || "tlaby17y";
   const tok = await hotmart.token();
-  const base = `transaction_status=APPROVED&product_id=7860446&start_date=${since}&end_date=${now}&max_results=500`;
+  const base = `transaction_status=APPROVED&product_id=7860446&start_date=${since}&end_date=${end}&max_results=500`;
   const H = { headers: { Authorization: "Bearer " + tok } };
   const dh = await (await fetch("https://developers.hotmart.com/payments/api/v1/sales/history?" + base, H)).json();
   const txAlvo = new Map();
