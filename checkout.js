@@ -22,7 +22,7 @@ const LOTES = CRONOGRAMA;
 // PIN DE LOTE (ordem do Daniel 09/07/2026): a Rosa recupera SEMPRE neste lote, ignorando a virada
 // por data E o valor/oferta que a lead quase pagou. Trocar o off aqui — ou via env LOTE_PIN_OFF —
 // quando mudar o lote de recuperação. Deixar "" (vazio) volta ao cronograma automático por data.
-const LOTE_PIN_OFF = (process.env.LOTE_PIN_OFF != null ? process.env.LOTE_PIN_OFF : "tlaby17y"); // R$14,90
+const LOTE_PIN_OFF = (process.env.LOTE_PIN_OFF != null ? process.env.LOTE_PIN_OFF : "ptkdak4l"); // R$19,90 (ordem Daniel 20/07: recuperação só no ticket de 19,90; acabou o desconto de 14,90)
 function lotePin() { return LOTE_PIN_OFF ? (CRONOGRAMA.find(l => l.off === LOTE_PIN_OFF) || null) : null; }
 
 // Data de hoje em BRT no formato YYYY-MM-DD (comparável por string com inicio/fim do cronograma).
