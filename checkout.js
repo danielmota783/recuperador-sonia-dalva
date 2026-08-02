@@ -7,7 +7,7 @@ const PRODUTO_INGRESSO = "V106097949E";
 
 // MENTORIA Viver de Crochê — Turma 24 (carrinho 02/08+): venda na HUBLA, boleto parcelado na TMB.
 const MENTORIA_LINK = "https://pay.hub.la/gErfwE2J5gv9wZfeITn6"; // 12x R$49,65 no cartão ou R$480 à vista (pix/boleto)
-const MENTORIA_BOLETO_PARCELADO = "https://pay.tmb.com.br/SoniadalvaFe/F9N26067953"; // sem cartão: entrada R$97,60 + mensais R$97,60
+const MENTORIA_BOLETO_PARCELADO = "https://pay.tmbeducacao.com.br/SoniadalvaFe/4WQ260683ZQ"; // sem cartão: entrada R$97,60 + mensais R$97,60
 
 // CRONOGRAMA OFICIAL DOS LOTES (fonte: Planejamento/Infinitum Launch, calendário da campanha).
 // Cada lote vale num intervalo de datas (BRT). A Rosa calcula o lote VIGENTE pela data do dia —
