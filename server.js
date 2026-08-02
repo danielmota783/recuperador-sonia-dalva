@@ -31,6 +31,38 @@ const MODEL = ENV.MODEL || "claude-sonnet-4-6";
 const PORT = ENV.PORT || 3030;
 const HOTMART_HOTTOK = ENV.HOTMART_HOTTOK || ENV.HOTTOK || null; // aceita os dois nomes; valida assinatura quando setado
 const HUBLA_TOKEN = ENV.HUBLA_TOKEN || null; // valida o header x-hubla-token do webhook da Hubla (mentoria Turma 24)
+const HUBLA_PROCESS = ENV.HUBLA_PROCESS_ENABLED === "true"; // trava: desligada = só captura; ligada = cria lead + toque
+const hublaSeen = new Set(); // dedupe por x-hubla-idempotency (memória; reinício zera, o getLead segura a duplicata)
+
+// --- HUBLA: normalizador de eventos (shape v2.0.0 confirmado com payload real 02/08) ---
+function parseHubla(payload) {
+  const type = (payload && payload.type) || "";
+  const ev = (payload && payload.event) || {};
+  if (type === "lead.abandoned_checkout") {
+    const l = ev.lead || {};
+    return {
+      kind: "detect", gatilho: "mentoria_abandono", phone: l.phone || null,
+      firstName: String(l.fullName || "amiga").trim().split(/\s+/)[0] || "amiga",
+      value: ((l.amount && l.amount.totalCents) || 0) / 100,
+    };
+  }
+  const payer = ev.payer || {};
+  const inv = ev.invoice || {};
+  const base = {
+    phone: payer.phone || null,
+    firstName: String(payer.firstName || "amiga").trim().split(/\s+/)[0] || "amiga",
+    value: ((inv.amount && inv.amount.totalCents) || 0) / 100,
+  };
+  const status = String(inv.status || "").toLowerCase();
+  const method = String(inv.paymentMethod || "").toLowerCase();
+  if (type === "invoice.payment_succeeded" || (type === "invoice.status_updated" && status === "paid")) return { kind: "venda", ...base };
+  if (type === "invoice.payment_failed") return { kind: "detect", gatilho: "mentoria_cartao", ...base };
+  if (type === "invoice.created" && status !== "paid") {
+    if (method === "pix") return { kind: "detect", gatilho: "mentoria_pix", delayMin: 20, ...base };
+    if (method === "bank_slip" || method === "boleto") return { kind: "detect", gatilho: "mentoria_boleto", delayMin: 25, ...base };
+  }
+  return { kind: "ignorado", type };
+}
 if (!API_KEY) console.warn("[aviso] ANTHROPIC_API_KEY ausente — o servidor sobe, mas as respostas da IA falham até a chave ser configurada.");
 
 // Rede de seguranca: nada derruba o processo. Captura o ultimo erro pra diagnostico remoto.
@@ -48,7 +80,7 @@ const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 const hublaCaptures = []; // MODO CAPTURA Hubla: guarda os últimos eventos crus (mentoria na Hubla; normalizador entra depois de ver o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "hubla-captura-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "hubla-motor-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function backoff(attempt) { return Math.min(8000, 600 * Math.pow(2, attempt)) + Math.floor(Math.random() * 400); }
@@ -160,7 +192,7 @@ function cleanName(raw) {
 // identifica leads de teste (pra não sujar métrica de recuperação)
 function isTestLead(l) {
   const p = String(l.phone || "");
-  return /^5500000000/.test(p) || p === "5599991202143" || p === "5599999999900" || /teste|probe|yascara/i.test(l.firstName || "");
+  return /^5500000000/.test(p) || p === "5599991202143" || p === "5599999999900" || p === "5531985564671" /* Sonia testando o checkout */ || /teste|probe|yascara/i.test(l.firstName || "");
 }
 // Métricas SÓ de recuperação de vendas (abandono pix/boleto/cartão). Exclui lote_zero e testes.
 // Atribui: recuperado COM toque da Rosa (mérito real) vs orgânico (pagou sozinho).
@@ -230,8 +262,17 @@ const FLOW_NS_PIX = ENV.FLOW_NS_PIX || "content20260622165339_068522"; // fluxo 
 const FLOW_NS_BOLETO = ENV.FLOW_NS_BOLETO || "content20260701002836_228108"; // fluxo "Recuperação Boleto - IREC 02"
 const FLOW_NS_CARTAO = ENV.FLOW_NS_CARTAO || "content20260701003009_307573"; // fluxo "Recuperação Cartão Recusado - IREC 02"
 const FIRST_TOUCH = ENV.FIRST_TOUCH_ENABLED === "true"; // trava: só dispara automático quando ligado
+// Flows da MENTORIA Turma 24 (Hubla) — criados pelo Daniel em 02/08; cartão/abandono entram quando os flows existirem no ManyChat.
+const FLOW_NS_MENTORIA_PIX = ENV.FLOW_NS_MENTORIA_PIX || "content20260802153033_907519"; // "Recuperação Pix - Mentoria - Turma 24"
+const FLOW_NS_MENTORIA_BOLETO = ENV.FLOW_NS_MENTORIA_BOLETO || "content20260802153153_894115"; // "Recuperação Boleto - Mentoria - Turma 24"
+const FLOW_NS_MENTORIA_CARTAO = ENV.FLOW_NS_MENTORIA_CARTAO || null;
+const FLOW_NS_MENTORIA_ABANDONO = ENV.FLOW_NS_MENTORIA_ABANDONO || null;
 // mapa gatilho → flow do 1º toque. Só dispara se o flow existir; cartão/boleto ficam null até o flow ser montado no ManyChat.
-const FLOW_NS_BY_GATILHO = { ingresso_pix: FLOW_NS_PIX, ingresso_boleto: FLOW_NS_BOLETO, ingresso_cartao: FLOW_NS_CARTAO };
+const FLOW_NS_BY_GATILHO = {
+  ingresso_pix: FLOW_NS_PIX, ingresso_boleto: FLOW_NS_BOLETO, ingresso_cartao: FLOW_NS_CARTAO,
+  mentoria_pix: FLOW_NS_MENTORIA_PIX, mentoria_boleto: FLOW_NS_MENTORIA_BOLETO,
+  mentoria_cartao: FLOW_NS_MENTORIA_CARTAO, mentoria_abandono: FLOW_NS_MENTORIA_ABANDONO,
+};
 
 // --- VIGIA DE PIX/BOLETO PENDENTE (recuperação ativa via API Hotmart) ---
 const POLL_PRODUCTS = [7860446]; // ingresso IREC (mentoria 7016784 entra na Fase 3)
@@ -276,7 +317,8 @@ async function retryStuckTouches(now, cap = 12) {
   if (!FIRST_TOUCH) return [];
   const stuck = store.allLeads().filter(l =>
     l.state === "DETECTADO" && !l.firstTouchAt && !l.optout &&
-    (l.sck === "recuperacao" || l.gatilho === "ingresso_cartao") && !isTestLead(l));
+    (l.sck === "recuperacao" || l.gatilho === "ingresso_cartao") && !isTestLead(l) &&
+    !(l.touchAfter && Date.parse(l.touchAfter) > now)); // pix/boleto Hubla esperam a janela (quem pagou nesse meio tempo já saiu via payment_succeeded)
   const done = [];
   let n = 0;
   for (const l of stuck) {
@@ -531,6 +573,7 @@ const server = http.createServer(async (req, res) => {
         MODEL: ENV.MODEL || "(default)",
         hottokSet: !!HOTMART_HOTTOK,
         hublaTokenSet: !!HUBLA_TOKEN,               // webhook da mentoria (Hubla) pronto pra validar
+        hublaProcessEnabled: HUBLA_PROCESS,         // normalizador ligado (false = só captura)
         webhookHublaRecebido: hublaCaptures.length, // quantos eventos Hubla já capturamos (modo captura)
         anthropicSet: !!API_KEY,
         manychatSet: !!ENV.MANYCHAT_API_TOKEN,
@@ -635,25 +678,54 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { reply, status: escalated(reply) ? "escalado" : "em_conversa" });
     }
 
-    // --- WEBHOOK HUBLA (mentoria Turma 24): MODO CAPTURA ---
-    // Guarda o payload cru pra mapear o shape real antes de ligar o normalizador
-    // (lição do Hotmart: pix gerado ≠ abandono; não criar lead às cegas).
-    // Auth: header x-hubla-token deve bater com HUBLA_TOKEN. Dedupe futuro: x-hubla-idempotency.
+    // --- WEBHOOK HUBLA (mentoria Turma 24): captura + normalizador ---
+    // Shape confirmado com payload real (version 2.0.0, 02/08): abandono em event.lead, faturas em event.payer/event.invoice.
+    // Lição do Hotmart aplicada: pix/boleto gerado ≠ abandono → toque com atraso (touchAfter), quem paga nesse meio tempo
+    // vira invoice.payment_succeeded e sai da fila. Abandono (Hubla já espera 20min) e cartão recusado tocam direto.
+    // Auth: header x-hubla-token. Dedupe: x-hubla-idempotency + lead já existente no store.
     if (req.method === "POST" && url === "/webhook/hubla") {
+      const now = Date.now();
       const payload = await readJson(req);
       const tokenOk = !HUBLA_TOKEN || req.headers["x-hubla-token"] === HUBLA_TOKEN;
+      const idem = req.headers["x-hubla-idempotency"] || null;
       const cap = {
-        recebidoEm: new Date(Date.now()).toISOString(),
+        recebidoEm: new Date(now).toISOString(),
         tokenOk,
         type: (payload && (payload.type || payload.event_type)) || null,
-        idempotency: req.headers["x-hubla-idempotency"] || null,
+        idempotency: idem,
         payload,
       };
       hublaCaptures.push(cap);
-      if (hublaCaptures.length > 30) hublaCaptures.shift();
-      console.log("[hubla] evento capturado:", cap.type, "tokenOk:", tokenOk);
+      if (hublaCaptures.length > 300) hublaCaptures.shift();
       if (!tokenOk) return send(res, 401, { error: "x-hubla-token inválido" });
-      return send(res, 200, { ok: true, action: "capturado", type: cap.type });
+      if (!HUBLA_PROCESS) return send(res, 200, { ok: true, action: "capturado", type: cap.type });
+      if (idem && hublaSeen.has(idem)) return send(res, 200, { ok: true, action: "duplicado", type: cap.type });
+      if (idem) { hublaSeen.add(idem); if (hublaSeen.size > 2000) hublaSeen.delete(hublaSeen.values().next().value); }
+      const e = parseHubla(payload);
+      if (e.kind === "venda" && e.phone) {
+        const phone = toE164BR(e.phone) || store.normPhone(e.phone);
+        const lead = phone && store.getLead(phone);
+        if (lead) store.markRecovered(phone, e.value, now);
+        console.log("[hubla] venda:", phone, lead ? "recuperada" : "sem_lead");
+        return send(res, 200, { ok: true, action: lead ? "recuperado" : "venda_sem_lead" });
+      }
+      if (e.kind === "detect" && e.phone) {
+        const phone = toE164BR(e.phone);
+        if (!phone) return send(res, 200, { ok: true, action: "telefone_invalido" });
+        if (store.getLead(phone)) return send(res, 200, { ok: true, action: "ja_detectado", gatilho: e.gatilho });
+        const touchAfter = e.delayMin ? new Date(now + e.delayMin * 60 * 1000).toISOString() : null;
+        store.upsertLead({ phone, firstName: e.firstName, product: "mentoria", gatilho: e.gatilho, value: e.value, sck: "recuperacao", touchAfter }, now);
+        console.log("[hubla] detectado:", e.gatilho, phone, touchAfter ? "toque agendado" : "toque imediato");
+        // toque imediato só pra abandono/cartão; pix/boleto esperam o touchAfter (varredura do poll toca)
+        let ft = null;
+        const flowNs = FLOW_NS_BY_GATILHO[e.gatilho];
+        if (!touchAfter && FIRST_TOUCH && flowNs && !isTestLead({ phone, firstName: e.firstName })) {
+          try { await manychat.firstTouch({ phone, firstName: e.firstName, flowNs }); store.setState(phone, "ABORDADO", now, { firstTouch: true }); ft = "enviado"; }
+          catch (err) { ft = "erro: " + err.message; recordErr("hublaFirstTouch", err); }
+        }
+        return send(res, 200, { ok: true, action: "detectado", gatilho: e.gatilho, firstTouch: ft });
+      }
+      return send(res, 200, { ok: true, action: "ignorado", type: cap.type });
     }
     if (req.method === "GET" && url === "/api/_lasthook_hubla") {
       const key = new URLSearchParams(req.url.split("?")[1] || "").get("key");

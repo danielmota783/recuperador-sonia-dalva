@@ -34,6 +34,7 @@ function upsertLead(partial, ts) {
       value: partial.value || 0,
       offer: partial.offer || null,                  // código do lote (?off=) pra link do checkout
       sck: partial.sck || null,                      // atribuição de recuperação
+      touchAfter: partial.touchAfter || null,        // Hubla pix/boleto: 1º toque só depois desta hora (quem paga antes sai da fila)
       state: "DETECTADO",
       optout: false,
       messages: [],
