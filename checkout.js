@@ -5,6 +5,10 @@
 
 const PRODUTO_INGRESSO = "V106097949E";
 
+// MENTORIA Viver de Crochê — Turma 24 (carrinho 02/08+): venda na HUBLA, boleto parcelado na TMB.
+const MENTORIA_LINK = "https://pay.hub.la/gErfwE2J5gv9wZfeITn6"; // 12x R$49,65 no cartão ou R$480 à vista (pix/boleto)
+const MENTORIA_BOLETO_PARCELADO = "https://pay.tmb.com.br/SoniadalvaFe/F9N26067953"; // sem cartão: entrada R$97,60 + mensais R$97,60
+
 // CRONOGRAMA OFICIAL DOS LOTES (fonte: Planejamento/Infinitum Launch, calendário da campanha).
 // Cada lote vale num intervalo de datas (BRT). A Rosa calcula o lote VIGENTE pela data do dia —
 // sem manutenção manual, sem deploy a cada virada. Se as datas mudarem no Planejamento, atualizar aqui.
@@ -56,7 +60,7 @@ function pageLink() { return withSck(linkByOff(vigenteLote().off), SCK_PAGINA); 
 // Link de pagamento do lead, com SCK de atribuição. Prioridade: offer code exato da Hotmart →
 // casa por valor → lote VIGENTE (oferta do dia). Mentoria: sem link ainda → null.
 function checkoutLink(lead) {
-  if (lead && lead.product === "mentoria") return null;
+  if (lead && lead.product === "mentoria") return withSck(MENTORIA_LINK); // Hubla Turma 24
   const pin = lotePin();
   if (pin) return withSck(linkByOff(pin.off));                  // PIN: todos vão pro lote travado (R$14,90)
   if (!lead) return withSck(linkByOff(vigenteLote().off));
@@ -72,10 +76,11 @@ function checkoutLink(lead) {
 // {{VALOR}} só aparece em linhas de ingresso, então pra lead de mentoria devolve o preço de entrada.
 function priceLabel(lead) {
   const isIngresso = !lead || lead.product !== "mentoria";
+  if (!isIngresso) return "12x de R$ 49,65 ou R$ 480 \u00e0 vista";
   const pin = lotePin();
   if (isIngresso && pin) return "R$ " + pin.value.toFixed(2).replace(".", ","); // PIN: fala sempre R$14,90
   const v = isIngresso && lead && lead.value > 0 ? lead.value : vigenteLote().value;
   return "R$ " + v.toFixed(2).replace(".", ",");
 }
 
-module.exports = { checkoutLink, pageLink, priceLabel, vigenteLote, hojeBRT, GRUPO_ALUNAS, GRUPO_LOTE_ZERO, LOTE_ZERO_VALOR, PRODUTO_INGRESSO, LOTES, CRONOGRAMA };
+module.exports = { checkoutLink, pageLink, priceLabel, MENTORIA_LINK, MENTORIA_BOLETO_PARCELADO, vigenteLote, hojeBRT, GRUPO_ALUNAS, GRUPO_LOTE_ZERO, LOTE_ZERO_VALOR, PRODUTO_INGRESSO, LOTES, CRONOGRAMA };
