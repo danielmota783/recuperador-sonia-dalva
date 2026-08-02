@@ -727,6 +727,23 @@ const server = http.createServer(async (req, res) => {
       }
       return send(res, 200, { ok: true, action: "ignorado", type: cap.type });
     }
+    // --- HUBLA: converte leads antigas (ingresso/lote_zero) que abandonaram o checkout da MENTORIA hoje.
+    // POST {phones:[...], confirm:true} — sem confirm = dry run. Preserva histórico/optout; audita prevGatilho/prevState.
+    if (req.method === "POST" && url === "/api/_hubla_upgrade_shadowed") {
+      const key = new URLSearchParams(req.url.split("?")[1] || "").get("key");
+      const body = await readJson(req);
+      if ((body.key || key) !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
+      const phones = Array.isArray(body.phones) ? body.phones : [];
+      const alvo = phones.map(p => ({ phone: p, lead: store.getLead(p) }))
+        .filter(x => x.lead && !/^mentoria_/.test(x.lead.gatilho || ""));
+      if (body.confirm !== true) {
+        return send(res, 200, { dryRun: true, total: alvo.length, amostra: alvo.slice(0, 20).map(x => ({ phone: x.lead.phone, nome: x.lead.firstName, de: `${x.lead.gatilho}/${x.lead.state}` })) });
+      }
+      const now = Date.now();
+      const feitos = alvo.map(x => { const l = store.convertToMentoria(x.phone, now); return { phone: l.phone, nome: l.firstName, de: `${l.prevGatilho}/${l.prevState}` }; });
+      console.log("[hubla] upgrade_shadowed:", feitos.length);
+      return send(res, 200, { ok: true, convertidos: feitos.length, feitos });
+    }
     if (req.method === "GET" && url === "/api/_lasthook_hubla") {
       const key = new URLSearchParams(req.url.split("?")[1] || "").get("key");
       if (key !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });

@@ -62,6 +62,25 @@ function upsertLead(partial, ts) {
 
 function getLead(phone) { return load().leads[normPhone(phone)] || null; }
 
+// Converte lead antiga (ingresso/lote_zero) que abandonou o checkout da MENTORIA hoje:
+// reabre como mentoria_abandono preservando histórico de conversa e optout.
+// Guarda prevGatilho/prevState pra auditoria e reversão manual.
+function convertToMentoria(phone, ts) {
+  const db = load();
+  const l = db.leads[normPhone(phone)];
+  if (!l) return null;
+  if (/^mentoria_/.test(l.gatilho || "")) return l;
+  l.prevGatilho = l.gatilho; l.prevState = l.state;
+  l.gatilho = "mentoria_abandono"; l.product = "mentoria";
+  l.value = 595.8; l.sck = "recuperacao";
+  l.state = "DETECTADO";
+  l.firstTouchAt = null; l.touchAfter = null;
+  l.followupCount = 0; l.lastFollowupAt = null;
+  l.updatedAt = nowISO(ts);
+  persist(db);
+  return l;
+}
+
 // Apaga um lead (usado pra zerar testes — conversa limpa).
 function deleteLead(phone) {
   const db = load();
@@ -184,4 +203,4 @@ function metrics() {
   return m;
 }
 
-module.exports = { upsertLead, getLead, deleteLead, appendMessage, setState, markRecovered, recordFollowup, recordReengage, recordCadence, remapPhone, allLeads, metrics, normPhone };
+module.exports = { upsertLead, getLead, convertToMentoria, deleteLead, appendMessage, setState, markRecovered, recordFollowup, recordReengage, recordCadence, remapPhone, allLeads, metrics, normPhone };
