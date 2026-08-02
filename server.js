@@ -357,6 +357,8 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, fs.readFileSync(path.join(__dirname, "public", "index.html"), "utf8"), "text/html; charset=utf-8");
     if (req.method === "GET" && url === "/crm")
       return send(res, 200, fs.readFileSync(path.join(__dirname, "public", "crm.html"), "utf8"), "text/html; charset=utf-8");
+    if (req.method === "GET" && url === "/painel") // atuação da Rosa na recuperação (mentoria T24 + histórico)
+      return send(res, 200, fs.readFileSync(path.join(__dirname, "public", "painel.html"), "utf8"), "text/html; charset=utf-8");
     if (req.method === "GET" && url === "/widget.js")
       return send(res, 200, fs.readFileSync(path.join(__dirname, "public", "widget.js"), "utf8"), "application/javascript; charset=utf-8");
     if (req.method === "GET" && url === "/suporte")

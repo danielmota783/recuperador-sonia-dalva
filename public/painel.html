@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Rosa — Recuperação Turma 24</title>
+<style>
+  :root {
+    --bg: #faf6ef; --card: #ffffff; --ink: #2b2019; --sub: #8a7a6d; --line: #e8dfd2;
+    --verde: #2e7d54; --verde-soft: #e4f0e9; --terracota: #c96f4a; --amber: #b98a2f; --rose: #b8503f;
+    --hero-bg: #2e7d54; --hero-ink: #ffffff;
+  }
+  [data-theme="dark"] {
+    --bg: #171310; --card: #211c17; --ink: #f0e9df; --sub: #9c8d7e; --line: #352d25;
+    --verde: #5abf8a; --verde-soft: #1d2f26; --terracota: #e08b64; --amber: #d8ab55; --rose: #d97b6a;
+    --hero-bg: #1d4a34; --hero-ink: #eafff3;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--ink); padding: 22px; max-width: 1180px; margin: 0 auto; }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  h1 { font-size: 21px; }
+  .sub { color: var(--sub); font-size: 13px; }
+  .spacer { flex: 1; }
+  .btn { background: var(--card); color: var(--ink); border: 1px solid var(--line); padding: 6px 14px; border-radius: 999px; cursor: pointer; font-size: 12px; }
+  .btn.on { background: var(--verde); color: #fff; border-color: var(--verde); }
+
+  .vitais { display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); gap: 14px; margin-bottom: 26px; }
+  .vital { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 20px 22px; }
+  .vital .v { font-size: 46px; font-weight: 800; letter-spacing: -1px; line-height: 1.05; }
+  .vital .l { font-size: 13px; color: var(--sub); margin-top: 6px; }
+  .vital.hero { background: var(--hero-bg); border-color: var(--hero-bg); }
+  .vital.hero .v, .vital.hero .l { color: var(--hero-ink); }
+  .vital.hero .l { opacity: .8; }
+
+  section { margin-bottom: 26px; }
+  section > h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--sub); margin-bottom: 12px; }
+  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 860px) { .duo { grid-template-columns: 1fr; } }
+  .box { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px; }
+
+  .fstep { display: grid; grid-template-columns: 130px 1fr 84px; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .fstep .n { font-size: 13px; color: var(--sub); }
+  .bar { height: 26px; border-radius: 8px; background: var(--verde-soft); overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--verde); border-radius: 8px; min-width: 2px; transition: width .5s; }
+  .fstep .q { font-size: 20px; font-weight: 700; text-align: right; }
+  .fstep .q small { font-size: 11px; color: var(--sub); font-weight: 400; display: block; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--sub); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  td { padding: 9px 8px; border-bottom: 1px solid var(--line); }
+  tr:last-child td { border-bottom: none; }
+  td.num { font-weight: 700; font-size: 15px; }
+
+  .conv { display: flex; gap: 12px; padding: 11px 4px; border-bottom: 1px solid var(--line); align-items: flex-start; }
+  .conv:last-child { border-bottom: none; }
+  .conv .who { min-width: 150px; }
+  .conv .nm { font-weight: 700; font-size: 14px; }
+  .conv .ph { color: var(--sub); font-size: 11px; }
+  .conv .msg { flex: 1; font-size: 13px; color: var(--ink); opacity: .85; }
+  .conv .msg small { display: block; color: var(--sub); font-size: 11px; margin-top: 3px; }
+  .badge { font-size: 10px; font-weight: 700; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+  .b-DETECTADO { background: var(--verde-soft); color: var(--verde); }
+  .b-ABORDADO { background: #fdf0e3; color: var(--amber); }
+  .b-EM_CONVERSA, .b-OBJECAO { background: #fdeae2; color: var(--terracota); }
+  .b-RECUPERADO { background: var(--verde); color: #fff; }
+  .b-ESCALADO { background: #fbe3df; color: var(--rose); }
+  .b-PERDIDO, .b-INVALIDO, .b-INALCANCAVEL { background: var(--line); color: var(--sub); }
+  [data-theme="dark"] .b-ABORDADO { background: #3a2f1a; }
+  [data-theme="dark"] .b-EM_CONVERSA, [data-theme="dark"] .b-OBJECAO { background: #3b261c; }
+  [data-theme="dark"] .b-ESCALADO { background: #3d211c; }
+  .empty { color: var(--sub); font-size: 13px; padding: 8px 4px; }
+  footer { color: var(--sub); font-size: 11px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🧶 Rosa em campo</h1>
+  <span class="sub" id="sub">carregando…</span>
+  <span class="spacer"></span>
+  <button class="btn on" id="bMent" onclick="setEscopo('mentoria')">Mentoria T24</button>
+  <button class="btn" id="bTudo" onclick="setEscopo('tudo')">Tudo</button>
+  <button class="btn" onclick="toggleTheme()">☀︎/☾</button>
+</header>
+
+<div class="vitais" id="vitais"></div>
+
+<section>
+  <h2>Funil da recuperação</h2>
+  <div class="box" id="funil"></div>
+</section>
+
+<div class="duo">
+  <section>
+    <h2>Por gatilho</h2>
+    <div class="box"><table id="gat"></table></div>
+  </section>
+  <section>
+    <h2>Precisam de humano</h2>
+    <div class="box" id="humano"></div>
+  </section>
+</div>
+
+<section>
+  <h2>Conversas — últimas movimentações</h2>
+  <div class="box" id="convs"></div>
+</section>
+<footer>Atualiza sozinho a cada 45s · dados direto do motor da Rosa</footer>
+
+<script>
+const qs = new URLSearchParams(location.search);
+let KEY = qs.get("key") || localStorage.getItem("rosa_key") || "";
+if (qs.get("key")) { localStorage.setItem("rosa_key", qs.get("key")); history.replaceState(null, "", location.pathname); }
+if (!KEY) { KEY = prompt("Chave do painel:") || ""; localStorage.setItem("rosa_key", KEY); }
+let ESCOPO = "mentoria";
+const fmtR$ = v => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const rel = ts => { const m = Math.round((Date.now() - Date.parse(ts)) / 60000);
+  if (m < 1) return "agora"; if (m < 60) return m + "min"; const h = Math.floor(m / 60);
+  if (h < 24) return h + "h" + (m % 60 ? String(m % 60).padStart(2, "0") : ""); return Math.floor(h / 24) + "d"; };
+const GROTULO = { mentoria_abandono: "Abandono", mentoria_pix: "Pix pendente", mentoria_boleto: "Boleto pendente", mentoria_cartao: "Cartão recusado" };
+
+function setEscopo(e) { ESCOPO = e;
+  document.getElementById("bMent").className = "btn" + (e === "mentoria" ? " on" : "");
+  document.getElementById("bTudo").className = "btn" + (e === "tudo" ? " on" : "");
+  load(); }
+function toggleTheme() { const r = document.documentElement;
+  const t = r.dataset.theme === "dark" ? "light" : "dark";
+  r.dataset.theme = t; localStorage.setItem("rosa_theme", t); }
+document.documentElement.dataset.theme = localStorage.getItem("rosa_theme") ||
+  (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+
+async function load() {
+  const r = await fetch("/api/leads?key=" + encodeURIComponent(KEY));
+  if (r.status === 403) { document.getElementById("sub").textContent = "chave inválida — recarregue com ?key="; return; }
+  let leads = await r.json();
+  const teste = l => /teste|probe|yascara/i.test(l.firstName || "") || ["5599991202143", "5531985564671"].includes(l.phone);
+  leads = leads.filter(l => !teste(l));
+  if (ESCOPO === "mentoria") leads = leads.filter(l => (l.gatilho || "").startsWith("mentoria_"));
+
+  const tocadas = leads.filter(l => l.firstTouchAt);
+  const responderam = leads.filter(l => l.respondedAt);
+  const rec = leads.filter(l => l.state === "RECUPERADO");
+  const recRosa = rec.filter(l => l.firstTouchAt);
+  const emConversa = leads.filter(l => ["EM_CONVERSA", "OBJECAO"].includes(l.state));
+  const fila = leads.filter(l => l.state === "DETECTADO");
+  const valorRosa = recRosa.reduce((s, l) => s + (l.recoveredValue || 0), 0);
+
+  document.getElementById("sub").textContent = leads.length + " leads · " + new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  document.getElementById("vitais").innerHTML = `
+    <div class="vital hero"><div class="v">${fmtR$(valorRosa)}</div><div class="l">recuperado PELA ROSA (${recRosa.length} venda${recRosa.length === 1 ? "" : "s"} com toque dela)</div></div>
+    <div class="vital"><div class="v">${rec.length}</div><div class="l">recuperadas no total (${rec.length - recRosa.length} pagaram sozinhas)</div></div>
+    <div class="vital"><div class="v">${emConversa.length}</div><div class="l">em conversa com a Rosa agora</div></div>
+    <div class="vital"><div class="v">${fila.length}</div><div class="l">na fila aguardando toque</div></div>`;
+
+  const F = [["Detectadas", leads.length], ["Tocadas", tocadas.length], ["Responderam", responderam.length], ["Recuperadas", rec.length]];
+  const max = Math.max(1, leads.length);
+  document.getElementById("funil").innerHTML = F.map(([n, q], i) => {
+    const pctBase = i === 0 ? "" : Math.round(100 * q / Math.max(1, F[i - 1][1])) + "% da etapa anterior";
+    return `<div class="fstep"><span class="n">${n}</span><div class="bar"><i style="width:${100 * q / max}%"></i></div><span class="q">${q}<small>${pctBase}</small></span></div>`;
+  }).join("");
+
+  const gats = {};
+  for (const l of leads) { (gats[l.gatilho] = gats[l.gatilho] || []).push(l); }
+  document.getElementById("gat").innerHTML =
+    `<tr><th>Gatilho</th><th>Leads</th><th>Tocadas</th><th>Resp.</th><th>Recup.</th></tr>` +
+    Object.entries(gats).map(([g, ls]) =>
+      `<tr><td>${GROTULO[g] || g}</td><td class="num">${ls.length}</td><td class="num">${ls.filter(l => l.firstTouchAt).length}</td><td class="num">${ls.filter(l => l.respondedAt).length}</td><td class="num">${ls.filter(l => l.state === "RECUPERADO").length}</td></tr>`).join("") || `<tr><td class="empty">sem leads ainda</td></tr>`;
+
+  const esc = leads.filter(l => l.state === "ESCALADO");
+  document.getElementById("humano").innerHTML = esc.length
+    ? esc.map(l => conv(l)).join("")
+    : `<div class="empty">Ninguém escalado. A Rosa está dando conta.</div>`;
+
+  const vivas = leads.filter(l => (l.messages || []).length || l.firstTouchAt)
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)).slice(0, 25);
+  document.getElementById("convs").innerHTML = vivas.length ? vivas.map(l => conv(l)).join("")
+    : `<div class="empty">Nenhum toque enviado ainda.</div>`;
+}
+function conv(l) {
+  const m = (l.messages || []); const ult = m[m.length - 1];
+  const txt = ult ? (ult.role === "user" ? "ela: " : "Rosa: ") + ult.content.slice(0, 130) : "1º toque enviado, aguardando resposta";
+  return `<div class="conv"><div class="who"><div class="nm">${l.firstName || "amiga"}</div><div class="ph">${l.phone}</div></div>
+    <div class="msg">${txt.replace(/</g, "&lt;")}<small>${GROTULO[l.gatilho] || l.gatilho} · ${rel(l.updatedAt)} atrás</small></div>
+    <span class="badge b-${l.state}">${l.state.replace("_", " ")}</span></div>`;
+}
+load(); setInterval(load, 45000);
+</script>
+</body>
+</html>
