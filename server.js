@@ -30,6 +30,7 @@ const API_KEY = ENV.ANTHROPIC_API_KEY;
 const MODEL = ENV.MODEL || "claude-sonnet-4-6";
 const PORT = ENV.PORT || 3030;
 const HOTMART_HOTTOK = ENV.HOTMART_HOTTOK || ENV.HOTTOK || null; // aceita os dois nomes; valida assinatura quando setado
+const HUBLA_TOKEN = ENV.HUBLA_TOKEN || null; // valida o header x-hubla-token do webhook da Hubla (mentoria Turma 24)
 if (!API_KEY) console.warn("[aviso] ANTHROPIC_API_KEY ausente — o servidor sobe, mas as respostas da IA falham até a chave ser configurada.");
 
 // Rede de seguranca: nada derruba o processo. Captura o ultimo erro pra diagnostico remoto.
@@ -45,8 +46,9 @@ process.on("unhandledRejection", e => recordErr("unhandledRejection", e));
 // produtos IREC 2 (Hotmart) → tipo
 const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
+const hublaCaptures = []; // MODO CAPTURA Hubla: guarda os últimos eventos crus (mentoria na Hubla; normalizador entra depois de ver o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "pin-1990-v2"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "hubla-captura-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function backoff(attempt) { return Math.min(8000, 600 * Math.pow(2, attempt)) + Math.floor(Math.random() * 400); }
@@ -528,6 +530,8 @@ const server = http.createServer(async (req, res) => {
         DATA_DIR: process.env.DATA_DIR || "(NAO setado -> usa ./data EFEMERO)",
         MODEL: ENV.MODEL || "(default)",
         hottokSet: !!HOTMART_HOTTOK,
+        hublaTokenSet: !!HUBLA_TOKEN,               // webhook da mentoria (Hubla) pronto pra validar
+        webhookHublaRecebido: hublaCaptures.length, // quantos eventos Hubla já capturamos (modo captura)
         anthropicSet: !!API_KEY,
         manychatSet: !!ENV.MANYCHAT_API_TOKEN,
         hotmartSet: !!(ENV.HOTMART_CLIENT_ID && ENV.HOTMART_CLIENT_SECRET),
@@ -629,6 +633,32 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, { reply: "Tudo bem, amiga. Não te chamo mais por aqui. Qualquer dia que quiser, é só me responder. Um beijo.", status: "optout" });
       const reply = await callClaude(systemPrompt(gatilho), messages);
       return send(res, 200, { reply, status: escalated(reply) ? "escalado" : "em_conversa" });
+    }
+
+    // --- WEBHOOK HUBLA (mentoria Turma 24): MODO CAPTURA ---
+    // Guarda o payload cru pra mapear o shape real antes de ligar o normalizador
+    // (lição do Hotmart: pix gerado ≠ abandono; não criar lead às cegas).
+    // Auth: header x-hubla-token deve bater com HUBLA_TOKEN. Dedupe futuro: x-hubla-idempotency.
+    if (req.method === "POST" && url === "/webhook/hubla") {
+      const payload = await readJson(req);
+      const tokenOk = !HUBLA_TOKEN || req.headers["x-hubla-token"] === HUBLA_TOKEN;
+      const cap = {
+        recebidoEm: new Date(Date.now()).toISOString(),
+        tokenOk,
+        type: (payload && (payload.type || payload.event_type)) || null,
+        idempotency: req.headers["x-hubla-idempotency"] || null,
+        payload,
+      };
+      hublaCaptures.push(cap);
+      if (hublaCaptures.length > 30) hublaCaptures.shift();
+      console.log("[hubla] evento capturado:", cap.type, "tokenOk:", tokenOk);
+      if (!tokenOk) return send(res, 401, { error: "x-hubla-token inválido" });
+      return send(res, 200, { ok: true, action: "capturado", type: cap.type });
+    }
+    if (req.method === "GET" && url === "/api/_lasthook_hubla") {
+      const key = new URLSearchParams(req.url.split("?")[1] || "").get("key");
+      if (key !== ENV.MANYCHAT_API_TOKEN) return send(res, 403, { error: "forbidden" });
+      return send(res, 200, { total: hublaCaptures.length, tokenSet: !!HUBLA_TOKEN, eventos: hublaCaptures });
     }
 
     // --- WEBHOOK HOTMART: detecta abandono OU marca venda recuperada ---
