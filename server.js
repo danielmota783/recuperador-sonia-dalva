@@ -80,7 +80,7 @@ const PRODUCT_MAP = { "7860446": "ingresso", "7016784": "mentoria" };
 let lastHotmart = null; // último payload cru recebido (pra confirmar o shape real)
 const hublaCaptures = []; // MODO CAPTURA Hubla: guarda os últimos eventos crus (mentoria na Hubla; normalizador entra depois de ver o shape real)
 let lastReplyHit = null; // grampo: último request cru ao /api/reply (debug da ponte ManyChat)
-const BUILD = "hubla-motor-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
+const BUILD = "mentoria-venda-direta-v1"; // marcador de deploy (pra confirmar qual versão está no ar)
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function backoff(attempt) { return Math.min(8000, 600 * Math.pow(2, attempt)) + Math.floor(Math.random() * 400); }
